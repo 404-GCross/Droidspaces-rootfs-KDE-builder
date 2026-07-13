@@ -20,13 +20,18 @@ ARG USERNAME
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# 加速下载
+RUN echo "max_parallel_downloads=10" >> /etc/dnf/dnf.conf && \
+    echo "fastestmirror=True" >> /etc/dnf/dnf.conf && \
+    echo "defaultyes=True" >> /etc/dnf/dnf.conf
+
 # 复制本仓库内预编译的 anland_kde rpm 包
 COPY anland-build/Fedora43/kwin/*.rpm /tmp/anland-build/Fedora43/kwin/
 COPY anland-build/Fedora43/xwayland/*.rpm /tmp/anland-build/Fedora43/xwayland/
 
 RUN dnf install -y --setopt=install_weak_deps=False \
     # 核心工具组件 
-    bash jq dialog coreutils file findutils grep sed gawk curl wget ca-certificates bash-completion systemd-udev dbus-daemon systemd systemd-resolved fastfetch pciutils \
+    bash jq dialog coreutils file findutils grep sed gawk curl wget ca-certificates bash-completion systemd-udev dbus-daemon systemd systemd-pam systemd-resolved fastfetch pciutils \
     # 用户请求的基础开发/编辑工具
     git nano sudo \
     # 网络与 SSH 工具（包含 DHCP 客户端）
@@ -41,7 +46,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
     if [ "$BUILD_KDE" = "min" ]; then \
         dnf install -y --setopt=install_weak_deps=False \
         dbus-x11 xrandr xset xrdb xhost google-noto-cjk-fonts google-noto-emoji-color-fonts plasma-desktop pipewire pipewire-pulseaudio wireplumber powerdevil kscreen plasma-pa ark kwin upower konsole \
-        dolphin kate kinfocenter glx-utils pulseaudio-utils vulkan-tools fedora-logos plasma-workspace plasma-workspace-x11 kwin-x11; \
+        dolphin kate kinfocenter glx-utils pulseaudio-utils vulkan-tools fedora-logos plasma-milou plasma-workspace plasma-workspace-x11 kwin-x11; \
     fi && \
     # 精简KDE
     if [ "$BUILD_KDE" = "conc" ]; then \
@@ -49,7 +54,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
         dbus-x11 xrandr xset xrdb xhost google-noto-cjk-fonts google-noto-emoji-color-fonts plasma-desktop pipewire pipewire-pulseaudio wireplumber powerdevil kscreen plasma-pa ark kwin upower konsole \
         dolphin kate kinfocenter glx-utils pulseaudio-utils vulkan-tools fedora-logos aha clinfo dmidecode libdisplay-info pciutils wayland-utils xorg-x11-server-Xorg \
         kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kscreenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
-        kf6-kimageformats plasma-browser-integration libcanberra-gtk3 gstreamer1-plugins-base gstreamer1-plugins-good sound-theme-freedesktop chromium plasma-workspace plasma-workspace-x11 kwin-x11; \
+        kf6-kimageformats plasma-browser-integration libcanberra-gtk3 gstreamer1-plugins-base gstreamer1-plugins-good sound-theme-freedesktop chromium plasma-milou plasma-workspace plasma-workspace-x11 kwin-x11; \
     fi && \
     # mobile版KDE
     if [ "$BUILD_KDE" = "mobile" ]; then \
@@ -97,6 +102,18 @@ RUN dnf install -y --setopt=install_weak_deps=False \
         ln -sf /usr/local/etc/tmoe-linux/git/debian.sh /usr/local/bin/tmoe && \
         chmod -R 755 /usr/local/etc/tmoe-linux; \
     fi && \
+    for desktop_file in /usr/share/applications/*chromium*.desktop; do \
+        if [ -f "$desktop_file" ]; then \
+            sed -i 's/^Exec=\([^ ]*chromium[^ ]*\)/Exec=\1 --no-sandbox --test-type --password-store=basic/g' "$desktop_file"; \
+        fi; \
+    done && \
+    echo '#!/bin/bash' > /usr/local/bin/chromium-browser && \
+    echo 'exec /usr/bin/chromium-browser --no-sandbox --test-type --password-store=basic "$@"' >> /usr/local/bin/chromium-browser && \
+    chmod +x /usr/local/bin/chromium-browser && \
+    echo '#!/bin/bash' > /usr/local/bin/chromium && \
+    echo 'exec /usr/bin/chromium --no-sandbox --test-type --password-store=basic "$@"' >> /usr/local/bin/chromium && \
+    chmod +x /usr/local/bin/chromium && \
+    dnf upgrade -y && \
     dnf clean all && \
     rm -rf /var/cache/dnf
 
@@ -153,7 +170,6 @@ RUN if [ "$ENABLE_anland_kde_ARG" != "true" ]; then \
         echo "DISPLAY=:5" >> /etc/environment; \
     else \
         echo "WAYLAND_DISPLAY=wayland-0" >> /etc/environment; \
-        echo "DISPLAY=:0" >> /etc/environment; \
         echo "QT_QPA_PLATFORM=wayland" >> /etc/environment; \
         echo "ANLAND=1" >> /etc/environment; \
         echo "ANLAND_SOCKET=/run/display.sock" >> /etc/environment; \
@@ -161,10 +177,6 @@ RUN if [ "$ENABLE_anland_kde_ARG" != "true" ]; then \
         echo "MESA_LOADER_DRIVER_OVERRIDE=kgsl" >> /etc/environment; \
         echo "GALLIUM_DRIVER=kgsl" >> /etc/environment; \
         echo "FD_FORCE_KGSL=1" >> /etc/environment; \
-    fi
-# Fedora mobile 默认缩放 300%
-RUN if [ "$BUILD_KDE" = "mobile" ]; then \
-        echo "QT_SCALE_FACTOR=3" >> /etc/environment; \
     fi
 # 音频选择
 RUN if [ "$PulseAudio" = "socket" ]; then \
@@ -174,6 +186,7 @@ RUN if [ "$PulseAudio" = "socket" ]; then \
     fi
 
 # 输入法开机自启动
+COPY scripts/start/ /tmp/droidspaces-start/
 RUN <<'EOF_RUN'
     if [ "$ENABLE_srf_ARG" = "true" ]; then
     mkdir -p /home/${USERNAME}/.config/autostart
@@ -216,68 +229,22 @@ EOF
     fi
     chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
     if [ "$BUILD_KDE_plus" = "true" ] && [ "$BUILD_KDE" = "mobile" ] ; then
-    cat <<EOF > /etc/systemd/system/plasma-mobile.service
-[Unit]
-Description=Start Plasma Mobile
-After=network.target display-manager.service
-
-[Service]
-Type=simple
-User=1000
-PAMName=login
-
-EnvironmentFile=-/etc/environment
-ExecStart=/bin/bash -lc 'startplasmamobile'
-Restart=no
-
-[Install]
-WantedBy=multi-user.target
-EOF
+    install -Dm644 /tmp/droidspaces-start/plasma-mobile.service /etc/systemd/system/plasma-mobile.service
     mkdir -p /etc/systemd/system/multi-user.target.wants
     ln -sf /etc/systemd/system/plasma-mobile.service /etc/systemd/system/multi-user.target.wants/plasma-mobile.service
     fi
     if [ "$BUILD_KDE_plus" = "true" ] && [ "$ENABLE_anland_kde_ARG" = "false" ] && [ "$BUILD_KDE" != "mobile" ] ; then
-    cat <<EOF > /etc/systemd/system/plasma-x11.service
-[Unit]
-Description=Start Plasma X11
-After=network.target display-manager.service
-
-[Service]
-Type=simple
-User=1000
-EnvironmentFile=-/etc/environment
-ExecStart=/bin/bash -lc 'DISPLAY=:5 startplasma-x11'
-Restart=no
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
+    install -Dm644 /tmp/droidspaces-start/plasma-x11.service /etc/systemd/system/plasma-x11.service
     mkdir -p /etc/systemd/system/multi-user.target.wants
     ln -sf /etc/systemd/system/plasma-x11.service /etc/systemd/system/multi-user.target.wants/plasma-x11.service
     fi
     # KDE wayland 自启动
     if [ "$BUILD_KDE_plus" = "true" ] && [ "$ENABLE_anland_kde_ARG" = "true" ] && [ "$BUILD_KDE" != "mobile" ] ; then
-    cat <<EOF > /etc/systemd/system/plasma-wayland.service
-[Unit]
-Description=Start Plasma Wayland
-After=network.target display-manager.service
-
-[Service]
-Type=simple
-User=1000
-PAMName=login
-
-EnvironmentFile=-/etc/environment
-ExecStart=/bin/bash -lc 'startplasma-wayland'
-Restart=no
-
-[Install]
-WantedBy=multi-user.target
-EOF
+    install -Dm644 /tmp/droidspaces-start/plasma-wayland.service /etc/systemd/system/plasma-wayland.service
     mkdir -p /etc/systemd/system/multi-user.target.wants
     ln -sf /etc/systemd/system/plasma-wayland.service /etc/systemd/system/multi-user.target.wants/plasma-wayland.service
     fi
+    rm -rf /tmp/droidspaces-start
 EOF_RUN
 
 RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
