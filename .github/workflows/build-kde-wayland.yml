@@ -246,6 +246,36 @@ jobs:
               test -f "/tmp/anland/$BUILD_SCRIPT"
               chmod +x "/tmp/anland/$BUILD_SCRIPT"
 
+              if [ "$BUILD_TARGET" = Fedora43 ] || [ "$BUILD_TARGET" = Fedora44 ]; then
+            python3 - "/tmp/anland/$BUILD_SCRIPT" <<'PY'
+          import pathlib
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          text = path.read_text()
+          old = '''    local first_source_line
+              first_source_line=$(grep -n "^Source0:" "$spec" | head -1 | cut -d: -f1)
+              if [ -n "$first_source_line" ]; then
+                  sed -i "${first_source_line}a Patch0: $patchbase" "$spec"
+              fi
+          '''
+          new = '''    local first_source_line patch_number existing_patch_numbers
+              first_source_line=$(grep -n "^Source0:" "$spec" | head -1 | cut -d: -f1)
+              if [ -n "$first_source_line" ]; then
+                  existing_patch_numbers="$(sed -n -E 's/^Patch([0-9]*):.*/\\1/p' "$spec" | sed 's/^$/0/')"
+                  patch_number=0
+                  while printf '%s\\n' "$existing_patch_numbers" | grep -Fxq "$patch_number"; do
+                      patch_number=$((patch_number + 1))
+                  done
+                  sed -i "${first_source_line}a Patch${patch_number}: $patchbase" "$spec"
+              fi
+          '''
+          if old not in text:
+              raise SystemExit("Fedora Anland build script patch anchor not found")
+          path.write_text(text.replace(old, new))
+          PY
+              fi
+
               if [ "$BUILD_TARGET" = Arch ]; then
                 su -s /bin/bash anland -c "cd /tmp/anland/$(dirname "$BUILD_SCRIPT") && WORKDIR=/tmp/kde-packages ./$(basename "$BUILD_SCRIPT") --noconfirm"
                 chmod -R a+rwX /tmp/kde-packages
