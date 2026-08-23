@@ -47,7 +47,7 @@ The goal is to reduce the amount of manual setup required to run a desktop Linux
 - Optional Chinese locale with `zh_CN.UTF-8` and `Asia/Shanghai` timezone.
 - Optional Fcitx5 input method. Chinese input addons are installed when Chinese localization is enabled.
 - Snapdragon GPU support using configuration from `mesa-for-android-container`.
-- During image builds, each distribution Dockerfile calls `scripts/install-mesa.sh` from the corresponding image and selects an ARM64 Mesa asset for all seven targets: Debian 13, Ubuntu 24/25/26, Fedora 43/44, and Arch. After installation, every distribution locks the related Mesa, KWin, and Xwayland packages so system updates cannot replace the driver: Debian/Ubuntu write `/etc/apt/preferences.d/hold-anland-package` with `Pin-Priority: -1`, Fedora uses a managed `exclude` block in `/etc/dnf/dnf.conf`, and Arch uses a managed `IgnorePkg` block in `/etc/pacman.conf`.
+- All seven distributions use `scripts/install-mesa.sh` to install the matching ARM64 Mesa driver and lock related Mesa, KWin, and Xwayland packages against replacement by system upgrades. Source selection, integrity verification, supported systems, and distribution-specific lock mechanisms are documented in the [scripts directory guide](scripts/README_english.md#mesa-installer).
 - Optional Snapdragon 8 Gen 2 Wayland display-corruption fix through a Turnip UBWC environment setting.
 - Container integration improvements for common Android/Droidspaces hardware, network, and group recognition.
 - Optional TMOE integration. Run `tmoe` inside the container to start it.
@@ -228,25 +228,12 @@ Wayland support depends on [anland](https://github.com/superturtlee/anland) and 
 
 ### One-Click Installation of Anland KDE Release Packages
 
-`scripts/install-anland-kde.sh` automatically detects the current Linux distribution, uses `anland-kde-manifest` from the fixed rolling Release `anland-kde-packages` to select the exact archive, downloads the patched KWin/Xwayland packages by their KWin version, and prevents system updates from overwriting them. Binary packages are no longer added to Git history; this Release contains five independent archives for Arch, Debian 13, Ubuntu 26, Fedora 43, and Fedora 44. Archive names include the KWin version, for example `anland-kde-ubuntu2604-kwin-6.7.3-arm64.tar.gz`.
-The script reads the system language in `LC_ALL`, `LC_MESSAGES`, and `LANG` priority order. Chinese locales produce Chinese messages; all other locales produce English messages.
-
-The installer supports Debian 13, Ubuntu 26.04, Fedora 43/44, and Arch Linux on ARM64/aarch64 only. It downloads, preflights, and extracts packages as the invoking user, then elevates only for installation. Debian and Ubuntu use installer-managed `apt-mark hold` state, Fedora uses a managed `excludepkgs` block in `/etc/dnf/dnf.conf`, and Arch uses pacman `IgnorePkg` entries for equivalent package locking.
+`scripts/install-anland-kde.sh` detects the ARM64 distribution, installs matching patched KWin/Xwayland packages from the fixed rolling Release, and locks the related packages. Supported systems, download mirrors, integrity checks, options, and standalone installation details are documented in the [scripts directory guide](scripts/README_english.md#anland-kde-installer).
 
 Run it from the repository root:
 
 ```bash
 sudo ./scripts/install-anland-kde.sh
-```
-
-On startup, the installer probes GitHub, `gh-proxy.com`, and `ghproxy.net` in that fixed order. A probe taking two seconds or longer is shown as a timeout; enter `1`, `2`, or `3` to choose a source. When a third-party mirror is selected, both the downloaded manifest and archive are verified against SHA-256 digests published by the GitHub Release API; this requires `jq`, `sha256sum`, and access to `api.github.com`. For non-interactive use, pass `-1` or `--1` to select GitHub directly and skip probing. GitHub Actions builds use `--1`.
-
-Or download the installer directly:
-
-```bash
-curl -fLO https://raw.githubusercontent.com/Goldzxcbug/Droidspaces-rootfs-KDE-builder/main/scripts/install-anland-kde.sh
-chmod +x install-anland-kde.sh
-sudo ./install-anland-kde.sh
 ```
 
 Recommended build options:
@@ -283,7 +270,7 @@ If `mobile` is selected, the workflow forces Wayland on because Plasma Mobile is
 
 ## Droidspaces USB Manager
 
-All seven distribution templates install [Droidspaces-USB-Manager](https://github.com/Yizhou147/Droidspaces-USB-Manager) through `scripts/install-usb-manager.sh`. The installer detects Debian/Ubuntu, Fedora, or Arch, installs the matching PyQt5, ADB, udev, NTFS, and exFAT dependencies through APT, DNF, or Pacman, and fixes command paths that are Debian-specific in the upstream source.
+All seven distribution templates install [Droidspaces-USB-Manager](https://github.com/Yizhou147/Droidspaces-USB-Manager) through `scripts/install-usb-manager.sh`, including distribution dependencies, command-line entry points, an application-menu entry, and a desktop shortcut. Installer options and update instructions are in the [scripts directory guide](scripts/README_english.md#usb-manager-installer).
 
 Hardware access must be enabled when importing the RootFS into Droidspaces. Without it, `/sys/bus/usb` and `/sys/bus/scsi` devices are not visible inside the container. The installer creates both an application-menu entry and a `~/Desktop/usb-manager.desktop` desktop shortcut. After entering KDE, you can also run:
 
@@ -297,14 +284,6 @@ Two command-line entry points are also installed:
 usb-passthrough
 usb-storage-passthrough
 ```
-
-To install or update the application separately on an existing system, run this from the repository root:
-
-```bash
-sudo ./scripts/install-usb-manager.sh --user "$USER"
-```
-
-Like `scripts/install-anland-kde.sh`, this installer supports automatic privilege escalation and Chinese/English output. If `--user` is omitted, it tries `SUDO_USER`, the logged-in user, and then the first regular user.
 
 ## Local Build
 
@@ -375,15 +354,13 @@ Ubuntu-26-KDE-Wayland-Droidspaces-rootfs-aarch64-local.tar.xz
 
 ## Install Hardware Firmware
 
-Debian 13 and Ubuntu 24/25/26 RootFS images include `/usr/local/bin/download-firmware`. It installs `linux-firmware`, decompresses `.zst` firmware under `/lib/firmware` into regular firmware files, and repairs symbolic links that previously pointed to compressed files. This is useful when a kernel, driver, or container environment cannot load compressed firmware directly.
+Debian 13 and Ubuntu 24/25/26 RootFS images include `/usr/local/bin/download-firmware` for installing and decompressing hardware firmware. Dependencies, repeat-run behavior, and processing details are in the [scripts directory guide](scripts/README_english.md#firmware-tool).
 
 The tool is copied into the RootFS but is not run automatically during the build or container startup. Run it manually inside the container when needed:
 
 ```bash
 sudo download-firmware
 ```
-
-The script installs `zstd` and `linux-firmware`, so working package repositories and network access are required. On success it creates `/var/lib/.fw-setup-completed`. The current script does not use this marker to skip later runs; running it again still refreshes package metadata and scans the firmware directory.
 
 ## Repository Layout
 
@@ -399,6 +376,8 @@ The script installs `zstd` and `linux-firmware`, so working package repositories
 ├── build_rootfs-native.sh
 ├── build_rootfs-qemu-aarch64.sh
 ├── scripts/
+│   ├── README.md
+│   ├── README_english.md
 │   ├── start/
 │   │   ├── plasma-mobile.service
 │   │   ├── plasma-wayland.service

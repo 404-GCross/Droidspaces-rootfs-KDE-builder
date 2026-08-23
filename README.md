@@ -47,7 +47,7 @@
 - 中文环境：可选启用 `zh_CN.UTF-8` 和 `Asia/Shanghai` 时区。
 - 输入法：可选安装 Fcitx5；启用中文环境时会额外安装中文输入支持。
 - Snapdragon GPU 支持：集成来自 `mesa-for-android-container` 的高通 GPU 相关配置。
-- 构建时各发行版 Dockerfile 会从对应镜像中调用 `scripts/install-mesa.sh`，自动选择 ARM64 Mesa 资产，支持 Debian 13、Ubuntu 24/25/26、Fedora 43/44 和 Arch 共七个目标。安装完成后，所有发行版都会锁定 Mesa、KWin 和 Xwayland 相关包，避免系统更新覆盖驱动：Debian/Ubuntu 写入带 `Pin-Priority: -1` 的 `/etc/apt/preferences.d/hold-anland-package`，Fedora 在 `/etc/dnf/dnf.conf` 使用托管 `exclude` 块，Arch 在 `/etc/pacman.conf` 使用托管 `IgnorePkg` 块。
+- 全部七个发行版通过 `scripts/install-mesa.sh` 安装对应的 ARM64 Mesa 驱动，并锁定相关 Mesa、KWin 和 Xwayland 包，避免系统更新覆盖。镜像源选择、完整性校验、支持系统和各发行版锁定机制见 [scripts 目录说明](scripts/README.md#mesa-安装器)。
 
 - 骁龙 8 Gen 2 Wayland 花屏修复：可选将 Turnip UBWC 修复开关写入 RootFS 环境变量。
 - 容器增强：补充 Android/Droidspaces 环境下常见的硬件、网络和用户组识别配置。
@@ -229,25 +229,12 @@ Wayland 支持依赖 [anland](https://github.com/superturtlee/anland) 和 GitHub
 
 ### 一键安装 Anland KDE Release 包
 
-`scripts/install-anland-kde.sh` 会自动识别当前发行版，从固定滚动 Release `anland-kde-packages` 的 `anland-kde-manifest` 精确选择对应的压缩包，按 KWin 版本下载 patched KWin/Xwayland 包，然后防止系统更新将它们覆盖。二进制包不会再加入 Git 历史；这个 Release 包含 Arch、Debian 13、Ubuntu 26、Fedora 43 和 Fedora 44 的五个独立压缩包，文件名形如 `anland-kde-ubuntu2604-kwin-6.7.3-arm64.tar.gz`。
-脚本会按 `LC_ALL`、`LC_MESSAGES`、`LANG` 的优先级读取系统语言：中文 locale 输出中文，其他 locale 输出英文。
-
-支持 Debian 13、Ubuntu 26.04、Fedora 43/44 和 Arch Linux，仅支持 ARM64/aarch64。安装器在普通用户权限下下载、预检和解包，再仅以 root 权限执行安装。Debian/Ubuntu 使用受脚本记录管理的 `apt-mark hold`，Fedora 通过 `/etc/dnf/dnf.conf` 的托管 `excludepkgs` 块，Arch 通过 pacman 的 `IgnorePkg` 实现等效锁定。
+`scripts/install-anland-kde.sh` 会自动识别 ARM64 发行版，从固定滚动 Release 安装匹配的 patched KWin/Xwayland 包，并锁定相关软件包。支持的系统、下载镜像、完整性校验、参数和独立安装方法已移至 [scripts 目录说明](scripts/README.md#anland-kde-安装器)。
 
 从仓库根目录运行：
 
 ```bash
 sudo ./scripts/install-anland-kde.sh
-```
-
-启动后会按固定顺序测试 GitHub、`gh-proxy.com`、`ghproxy.net` 三个下载源；单个测试达到 2 秒会显示为超时，然后输入 `1`、`2` 或 `3` 选择下载源。选择第三方镜像时，下载的清单和归档都会以 GitHub Release API 公布的 SHA-256 digest 校验，因此需要系统具有 `jq`、`sha256sum`，且能访问 `api.github.com`。非交互场景可传入 `-1` 或 `--1` 直接使用 GitHub 并跳过测速；GitHub Actions 构建使用 `--1`。
-
-也可以直接获取安装器：
-
-```bash
-curl -fLO https://raw.githubusercontent.com/Goldzxcbug/Droidspaces-rootfs-KDE-builder/main/scripts/install-anland-kde.sh
-chmod +x install-anland-kde.sh
-sudo ./install-anland-kde.sh
 ```
 
 推荐构建选项：
@@ -284,7 +271,7 @@ startplasma-wayland
 
 ## Droidspaces USB Manager
 
-全部 7 个发行版模板都会通过 `scripts/install-usb-manager.sh` 安装 [Droidspaces-USB-Manager](https://github.com/Yizhou147/Droidspaces-USB-Manager)。安装器会自动识别 Debian/Ubuntu、Fedora 或 Arch 系统，使用 APT、DNF 或 Pacman 安装对应的 PyQt5、ADB、udev、NTFS 和 exFAT 依赖，并修正上游代码中仅适用于 Debian 的命令路径。
+全部 7 个发行版模板都会通过 `scripts/install-usb-manager.sh` 安装 [Droidspaces-USB-Manager](https://github.com/Yizhou147/Droidspaces-USB-Manager)，包括发行版依赖、命令行入口、应用菜单和桌面快捷方式。安装参数和更新方法见 [scripts 目录说明](scripts/README.md#usb-manager-安装器)。
 
 导入 RootFS 时必须开启 Droidspaces 的硬件访问，否则容器内看不到 `/sys/bus/usb` 和 `/sys/bus/scsi` 设备。安装器会同时创建应用菜单入口和 `~/Desktop/usb-manager.desktop` 桌面快捷方式。进入 KDE 后，也可以运行：
 
@@ -298,14 +285,6 @@ usb-manager
 usb-passthrough
 usb-storage-passthrough
 ```
-
-如果需要在已有系统中单独安装或更新，可在仓库根目录执行：
-
-```bash
-sudo ./scripts/install-usb-manager.sh --user "$USER"
-```
-
-与 `scripts/install-anland-kde.sh` 一样，该脚本支持自动提权、中文/英文日志。省略 `--user` 时会依次尝试 `SUDO_USER`、当前登录用户和第一个普通用户。
 
 ## 本地构建
 
@@ -376,15 +355,13 @@ Ubuntu-26-KDE-Wayland-Droidspaces-rootfs-aarch64-local.tar.xz
 
 ## 安装硬件固件
 
-Debian 13 和 Ubuntu 24/25/26 RootFS 内置了 `/usr/local/bin/download-firmware`，用于安装 `linux-firmware`，并将 `/lib/firmware` 中的 `.zst` 压缩固件解压为普通固件文件。脚本还会修复原本指向 `.zst` 文件的软链接，适用于内核、驱动或容器环境无法直接读取压缩固件的情况。
+Debian 13 和 Ubuntu 24/25/26 RootFS 内置 `/usr/local/bin/download-firmware`，用于安装并解压硬件固件。依赖、重复运行行为和处理流程见 [scripts 目录说明](scripts/README.md#固件工具)。
 
 该工具只会被复制到 RootFS，不会在构建或容器启动时自动执行。需要使用时，在容器内手动运行：
 
 ```bash
 sudo download-firmware
 ```
-
-脚本会安装 `zstd` 和 `linux-firmware`，因此执行时需要可用的软件源和网络连接。成功后会创建 `/var/lib/.fw-setup-completed` 标记文件。当前脚本不会根据该标记跳过后续执行；重复运行仍会更新软件包列表并重新扫描固件目录。
 
 ## 仓库结构
 
@@ -400,6 +377,8 @@ sudo download-firmware
 ├── build_rootfs-native.sh
 ├── build_rootfs-qemu-aarch64.sh
 ├── scripts/
+│   ├── README.md
+│   ├── README_english.md
 │   ├── start/
 │   │   ├── plasma-mobile.service
 │   │   ├── plasma-wayland.service
