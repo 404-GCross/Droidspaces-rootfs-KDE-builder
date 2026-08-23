@@ -39,9 +39,10 @@ COPY scripts/bashrc.sh /etc/profile.d/ds-aliases.sh
 
 # 通用 Droidspaces USB Manager 安装器
 COPY scripts/install-usb-manager.sh /usr/local/sbin/install-droidspaces-usb-manager
+COPY scripts/install-mesa.sh /usr/local/sbin/install-mesa
 
 # 赋予相关脚本可执行权限
-RUN chmod +x /usr/local/bin/download-firmware /usr/local/sbin/nosnap /etc/profile.d/ds-aliases.sh
+RUN chmod +x /usr/local/bin/download-firmware /usr/local/sbin/nosnap /etc/profile.d/ds-aliases.sh /usr/local/sbin/install-mesa
 
 RUN sed -i 's/Components: main/Components: main restricted universe multiverse/g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || \
     sed -i 's/main/main restricted universe multiverse/g' /etc/apt/sources.list 2>/dev/null && \
@@ -217,14 +218,7 @@ EOF_RUN
 
 # Mesa 驱动适配
 RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
-        echo "--> [开启] 正在下载并安装最新版 Mesa 驱动..." && \
-        URL=$(curl -s https://api.github.com/repos/lfdevs/mesa-for-android-container/releases/latest | \
-        jq -r '.assets[] | select(.name | test("mesa-for-android-container_.*_ubuntu_questing_arm64\\.tar\\.gz")) | .browser_download_url' | head -1) && \
-        if [ -z "$URL" ] || [ "$URL" = "null" ]; then echo "获取下载链接失败，可能是源仓库还没有提供 Ubuntu 版本的 Mesa 驱动或触发了限制"; exit 1; fi && \
-        wget -q --tries=5 --waitretry=3 -O /tmp/mesa.tar.gz "$URL" && \
-        tar -zxf /tmp/mesa.tar.gz -C / && \
-        rm /tmp/mesa.tar.gz && \
-        ldconfig; \
+        /usr/local/sbin/install-mesa --1; \
     else \
         echo "--> [跳过] 未开启 Mesa 驱动安装"; \
     fi

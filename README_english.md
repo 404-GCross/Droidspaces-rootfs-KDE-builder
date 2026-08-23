@@ -47,6 +47,7 @@ The goal is to reduce the amount of manual setup required to run a desktop Linux
 - Optional Chinese locale with `zh_CN.UTF-8` and `Asia/Shanghai` timezone.
 - Optional Fcitx5 input method. Chinese input addons are installed when Chinese localization is enabled.
 - Snapdragon GPU support using configuration from `mesa-for-android-container`.
+- During image builds, each distribution Dockerfile calls `scripts/install-mesa.sh` from the corresponding image and selects an ARM64 Mesa asset for all seven targets: Debian 13, Ubuntu 24/25/26, Fedora 43/44, and Arch. After installation, every distribution locks the related Mesa, KWin, and Xwayland packages so system updates cannot replace the driver: Debian/Ubuntu write `/etc/apt/preferences.d/hold-anland-package` with `Pin-Priority: -1`, Fedora uses a managed `exclude` block in `/etc/dnf/dnf.conf`, and Arch uses a managed `IgnorePkg` block in `/etc/pacman.conf`.
 - Optional Snapdragon 8 Gen 2 Wayland display-corruption fix through a Turnip UBWC environment setting.
 - Container integration improvements for common Android/Droidspaces hardware, network, and group recognition.
 - Optional TMOE integration. Run `tmoe` inside the container to start it.
@@ -406,6 +407,7 @@ The script installs `zstd` and `linux-firmware`, so working package repositories
 │   ├── download-firmware
 │   ├── install-usb-manager.sh
 │   ├── install-anland-kde.sh
+│   ├── install-mesa.sh
 │   ├── nosnap.sh
 │   ├── systemd257.sh
 │   ├── on_aaudio_socket.sh

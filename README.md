@@ -47,6 +47,8 @@
 - 中文环境：可选启用 `zh_CN.UTF-8` 和 `Asia/Shanghai` 时区。
 - 输入法：可选安装 Fcitx5；启用中文环境时会额外安装中文输入支持。
 - Snapdragon GPU 支持：集成来自 `mesa-for-android-container` 的高通 GPU 相关配置。
+- 构建时各发行版 Dockerfile 会从对应镜像中调用 `scripts/install-mesa.sh`，自动选择 ARM64 Mesa 资产，支持 Debian 13、Ubuntu 24/25/26、Fedora 43/44 和 Arch 共七个目标。安装完成后，所有发行版都会锁定 Mesa、KWin 和 Xwayland 相关包，避免系统更新覆盖驱动：Debian/Ubuntu 写入带 `Pin-Priority: -1` 的 `/etc/apt/preferences.d/hold-anland-package`，Fedora 在 `/etc/dnf/dnf.conf` 使用托管 `exclude` 块，Arch 在 `/etc/pacman.conf` 使用托管 `IgnorePkg` 块。
+
 - 骁龙 8 Gen 2 Wayland 花屏修复：可选将 Turnip UBWC 修复开关写入 RootFS 环境变量。
 - 容器增强：补充 Android/Droidspaces 环境下常见的硬件、网络和用户组识别配置。
 - TMOE：可选集成 TMOE，容器内执行 `tmoe` 即可启动。
@@ -406,6 +408,7 @@ sudo download-firmware
 │   ├── download-firmware
 │   ├── install-usb-manager.sh
 │   ├── install-anland-kde.sh
+│   ├── install-mesa.sh
 │   ├── nosnap.sh
 │   ├── systemd257.sh
 │   ├── on_aaudio_socket.sh
