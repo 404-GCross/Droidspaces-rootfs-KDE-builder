@@ -47,7 +47,7 @@
 - 中文环境：可选启用 `zh_CN.UTF-8` 和 `Asia/Shanghai` 时区。
 - 输入法：可选安装 Fcitx5；启用中文环境时会额外安装中文输入支持。
 - Snapdragon GPU 支持：集成来自 `mesa-for-android-container` 的高通 GPU 相关配置。
-- 全部七个发行版通过 `scripts/install-mesa.sh` 安装对应的 ARM64 Mesa 驱动，并锁定相关 Mesa、KWin 和 Xwayland 包，避免系统更新覆盖。镜像源选择、完整性校验、支持系统和各发行版锁定机制见 [scripts 目录说明](scripts/README.md#mesa-安装器)。
+- 全部七个发行版通过 `scripts/install-mesa.sh` 安装对应的 ARM64 Mesa 驱动及最新版 `droidspaces-media-decode` VA-API 驱动，并锁定相关 Mesa、KWin 和 Xwayland 包，避免系统更新覆盖。镜像源选择、完整性校验、支持系统和各发行版锁定机制见 [scripts 目录说明](scripts/README.md#mesa-安装器)。
 
 - 骁龙 8 Gen 2 Wayland 花屏修复：可选将 Turnip UBWC 修复开关写入 RootFS 环境变量。
 - 容器增强：补充 Android/Droidspaces 环境下常见的硬件、网络和用户组识别配置。
@@ -419,6 +419,7 @@ KDE 包只作为 GitHub Release 资产发布。手动运行 `build-kde-wayland.y
 
 - [Droidspaces-OSS](https://github.com/ravindu644/Droidspaces-OSS/)：本项目运行环境的基础。
 - [mesa-for-android-container](https://github.com/lfdevs/mesa-for-android-container)：高通 Snapdragon GPU 驱动支持。
+- [droidspaces-media-decode](https://github.com/Re-s/droidspaces-media-decode)：基于 Android MediaCodec 的容器 VA-API 硬件解码驱动。
 - [TMOE](https://github.com/2moe/tmoe)：容器内管理工具。
 - [anland](https://github.com/superturtlee/anland)：Wayland 显示后端和 patched KDE 相关工作。
 - [Droidspaces-USB-Manager](https://github.com/Yizhou147/Droidspaces-USB-Manager)：适用于Droidspaces 的 USB 存储和 ADB 设备管理工具。

@@ -8,7 +8,7 @@
 
 | 文件 | 运行位置 | 作用 |
 | --- | --- | --- |
-| `install-mesa.sh` | ARM64 Linux 容器 | 安装最新版 Android 容器专用 Mesa，并锁定 Mesa、KWin 和 Xwayland 包。 |
+| `install-mesa.sh` | ARM64 Linux 容器 | 安装最新版 Android 容器专用 Mesa 和 MediaCodec VA-API 驱动，并锁定 Mesa、KWin 和 Xwayland 包。 |
 | `install-anland-kde.sh` | ARM64 Linux 容器 | 安装 Anland patched KWin/Xwayland Release 包，并锁定相关包。 |
 | `install-usb-manager.sh` | Linux 容器 | 安装 Droidspaces USB Manager、发行版依赖、菜单入口和用户权限。 |
 | `systemd257.sh` | RootFS 构建环境 | 在需要时构建 systemd 257 兼容运行时，供旧 Android 内核使用。 |
@@ -22,9 +22,9 @@
 
 ## Mesa 安装器
 
-`install-mesa.sh` 从 `lfdevs/mesa-for-android-container` 的最新 GitHub Release 选择当前发行版对应的 ARM64 资产。支持 Debian 13、Ubuntu 24.04/25.10/26.04、Fedora 43/44 和 Arch Linux。
+`install-mesa.sh` 从 `lfdevs/mesa-for-android-container` 的最新 GitHub Release 选择当前发行版对应的 ARM64 Mesa 资产，并从 `Re-s/droidspaces-media-decode` 的最新稳定 Release 安装 `msm_drm_drv_video.so`。支持 Debian 13、Ubuntu 24.04/25.10/26.04、Fedora 43/44 和 Arch Linux；所有系统都将媒体解码驱动安装到 `/usr/lib/aarch64-linux-gnu/dri/msm_drm_drv_video.so`。
 
-安装器会严格检查 Release tag、资产名和官方下载地址。使用镜像源时，还会根据 GitHub Release API 公布的 SHA-256 digest 校验归档。下载支持断点续传，临时文件在退出时自动清理。
+安装器会严格检查 Release tag、资产名和官方下载地址。使用镜像源时，Mesa 归档会根据 GitHub Release API 公布的 SHA-256 digest 校验；媒体解码驱动在所有下载源下都会校验 Release API digest、上游 `SHA256SUMS` 及资产大小。下载支持断点续传，临时文件在退出时自动清理。
 
 从仓库根目录交互运行：
 
@@ -40,7 +40,7 @@ sudo ./scripts/install-mesa.sh --2  # gh-proxy.com
 sudo ./scripts/install-mesa.sh --3  # ghproxy.net
 ```
 
-三个来源选项互斥。`-1`、`-2`、`-3` 是对应的短参数，`--help` 可查看内置帮助。第三方源仍需访问 `api.github.com` 取得可信元数据，并需要 `jq` 和 `sha256sum`；下载由 `curl` 或 `wget` 完成。
+三个来源选项互斥，并同时作用于 Mesa 与媒体解码驱动下载。`-1`、`-2`、`-3` 是对应的短参数，`--help` 可查看内置帮助。第三方源仍需访问 `api.github.com` 取得可信元数据，并需要 `jq` 和 `sha256sum`；下载由 `curl` 或 `wget` 完成。
 
 安装完成后，脚本按发行版写入持久锁定：
 

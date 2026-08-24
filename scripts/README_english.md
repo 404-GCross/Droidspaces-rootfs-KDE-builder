@@ -8,7 +8,7 @@ This directory contains installers used while building the RootFS, maintenance t
 
 | File | Run in | Purpose |
 | --- | --- | --- |
-| `install-mesa.sh` | ARM64 Linux container | Installs the latest Android-container Mesa build and locks Mesa, KWin, and Xwayland packages. |
+| `install-mesa.sh` | ARM64 Linux container | Installs the latest Android-container Mesa build and MediaCodec VA-API driver, then locks Mesa, KWin, and Xwayland packages. |
 | `install-anland-kde.sh` | ARM64 Linux container | Installs Anland patched KWin/Xwayland Release packages and locks them. |
 | `install-usb-manager.sh` | Linux container | Installs Droidspaces USB Manager, distribution dependencies, launchers, and user permissions. |
 | `systemd257.sh` | RootFS build environment | Builds a systemd 257 compatibility runtime when required by an old Android kernel. |
@@ -22,9 +22,9 @@ This directory contains installers used while building the RootFS, maintenance t
 
 ## Mesa Installer
 
-`install-mesa.sh` selects the ARM64 asset for the current distribution from the latest `lfdevs/mesa-for-android-container` GitHub Release. It supports Debian 13, Ubuntu 24.04/25.10/26.04, Fedora 43/44, and Arch Linux.
+`install-mesa.sh` selects the ARM64 Mesa asset for the current distribution from the latest `lfdevs/mesa-for-android-container` GitHub Release, then installs `msm_drm_drv_video.so` from the latest stable `Re-s/droidspaces-media-decode` Release. It supports Debian 13, Ubuntu 24.04/25.10/26.04, Fedora 43/44, and Arch Linux. Every target installs the media decode driver at `/usr/lib/aarch64-linux-gnu/dri/msm_drm_drv_video.so`.
 
-The installer strictly validates the Release tag, asset name, and official download URL. Mirror downloads are verified against the SHA-256 digest published by the GitHub Release API. Downloads can resume, and temporary files are removed on exit.
+The installer strictly validates Release tags, asset names, and official download URLs. Mirror downloads of the Mesa archive are verified against the SHA-256 digest published by the GitHub Release API. For every source, the media decode driver is checked against the Release API digest, upstream `SHA256SUMS`, and the published asset size. Downloads can resume, and temporary files are removed on exit.
 
 Run interactively from the repository root:
 
@@ -40,7 +40,7 @@ sudo ./scripts/install-mesa.sh --2  # gh-proxy.com
 sudo ./scripts/install-mesa.sh --3  # ghproxy.net
 ```
 
-The source options are mutually exclusive. `-1`, `-2`, and `-3` are equivalent short options; use `--help` for built-in help. Third-party sources still require access to `api.github.com` for trusted metadata, plus `jq` and `sha256sum`. Downloads use either `curl` or `wget`.
+The source options are mutually exclusive and apply to both the Mesa and media decode driver downloads. `-1`, `-2`, and `-3` are equivalent short options; use `--help` for built-in help. Third-party sources still require access to `api.github.com` for trusted metadata, plus `jq` and `sha256sum`. Downloads use either `curl` or `wget`.
 
 After installation, persistent package locks are written for each distribution:
 

@@ -2,9 +2,16 @@
 set -euo pipefail
 
 # Install the ARM64 Mesa build published by mesa-for-android-container.
-# The archive format and package manager are selected from /etc/os-release.
+# Also install the MediaCodec VA-API driver published by droidspaces-media-decode.
+# The Mesa archive format and package manager are selected from /etc/os-release.
 readonly MESA_REPOSITORY="lfdevs/mesa-for-android-container"
 readonly MESA_API_URL="https://api.github.com/repos/${MESA_REPOSITORY}/releases/latest"
+readonly MEDIA_DECODE_REPOSITORY="Re-s/droidspaces-media-decode"
+readonly MEDIA_DECODE_API_URL="https://api.github.com/repos/${MEDIA_DECODE_REPOSITORY}/releases/latest"
+readonly MEDIA_DRIVER_NAME="msm_drm_drv_video.so"
+readonly MEDIA_CHECKSUMS_NAME="SHA256SUMS"
+readonly MEDIA_DRIVER_INSTALL_DIR="/usr/lib/aarch64-linux-gnu/dri"
+readonly MEDIA_DRIVER_INSTALL_PATH="${MEDIA_DRIVER_INSTALL_DIR}/${MEDIA_DRIVER_NAME}"
 readonly SOURCE_PROBE_TIMEOUT_SECONDS=2
 readonly GITHUB_RELEASE_URL="https://github.com"
 readonly GH_PROXY_RELEASE_URL="https://gh-proxy.com/https://github.com"
@@ -19,6 +26,7 @@ readonly PACMAN_MANAGED_END="# END install-mesa package holds"
 readonly SYSTEMD257_STATE="/etc/droidspaces-systemd257"
 readonly MAX_ARCHIVE_BYTES=$((512 * 1024 * 1024))
 readonly MAX_EXTRACTED_BYTES=$((2 * 1024 * 1024 * 1024))
+readonly MAX_MEDIA_DRIVER_BYTES=$((16 * 1024 * 1024))
 
 UI_LANG="en"
 TARGET=""
@@ -35,6 +43,15 @@ SKIP_SOURCE_PROBE=false
 OFFICIAL_DOWNLOAD_URL=""
 OFFICIAL_ARCHIVE_DIGEST=""
 EXPECTED_ARCHIVE_SHA256=""
+MEDIA_RELEASE_TAG=""
+MEDIA_DRIVER_DOWNLOAD_URL=""
+MEDIA_DRIVER_RELEASE_DIGEST=""
+MEDIA_DRIVER_RELEASE_SIZE=""
+MEDIA_CHECKSUMS_DOWNLOAD_URL=""
+MEDIA_CHECKSUMS_RELEASE_DIGEST=""
+MEDIA_DRIVER_FILE=""
+MEDIA_CHECKSUMS_FILE=""
+MEDIA_DRIVER_TEMP_FILE=""
 MESA_PACKAGE_NAMES=()
 
 detect_language() {
@@ -113,6 +130,9 @@ parse_arguments() {
 }
 
 cleanup() {
+    if [[ -n "$MEDIA_DRIVER_TEMP_FILE" && -e "$MEDIA_DRIVER_TEMP_FILE" ]]; then
+        rm -f -- "$MEDIA_DRIVER_TEMP_FILE"
+    fi
     if [[ -n "$WORK_DIR" && -d "$WORK_DIR" ]]; then
         rm -rf -- "$WORK_DIR"
     fi
@@ -245,7 +265,7 @@ check_architecture() {
 require_commands() {
     local command_name
 
-    for command_name in awk cat chmod cp dirname grep install mktemp rm sed sort stat tar uname; do
+    for command_name in awk cat chmod cp dirname grep install mktemp mv od rm sed sha256sum sort stat tar tr uname; do
         command -v "$command_name" >/dev/null 2>&1 || die \
             "缺少运行安装器所需的命令：${command_name}。" \
             "The installer requires the missing command: ${command_name}."
@@ -354,6 +374,14 @@ download_source_name() {
 
 download_url_for_source() {
     local source="$1"
+
+    download_url_for_release_asset "$source" "$MESA_REPOSITORY" "$OFFICIAL_DOWNLOAD_URL"
+}
+
+download_url_for_release_asset() {
+    local source="$1"
+    local repository="$2"
+    local official_url="$3"
     local source_url official_path
 
     case "$source" in
@@ -363,8 +391,8 @@ download_url_for_source() {
         *) return 1 ;;
     esac
 
-    official_path="${OFFICIAL_DOWNLOAD_URL#"$GITHUB_RELEASE_URL"}"
-    [[ "$official_path" == "/${MESA_REPOSITORY}/releases/download/"* ]] || return 1
+    official_path="${official_url#"$GITHUB_RELEASE_URL"}"
+    [[ "$official_path" == "/${repository}/releases/download/"* ]] || return 1
     printf '%s%s' "$source_url" "$official_path"
 }
 
@@ -492,6 +520,175 @@ validate_release_asset_checksum() {
         [[ "$actual_checksum" != "$EXPECTED_ARCHIVE_SHA256" ]]; then
         return 1
     fi
+}
+
+release_digest_sha256() {
+    local digest="$1"
+
+    [[ "$digest" =~ ^sha256:([0-9A-Fa-f]{64})$ ]] || return 1
+    printf '%s' "${BASH_REMATCH[1],,}"
+}
+
+resolve_media_decode_release() {
+    local metadata driver_json checksums_json expected_url
+
+    log "正在读取媒体解码驱动最新 Release..." \
+        "Reading the latest media decode driver Release..."
+    metadata="$(download_stdout "$MEDIA_DECODE_API_URL")" || die \
+        "无法获取媒体解码驱动 Release 信息，可能触发了 GitHub API 限制。" \
+        "Unable to fetch media decode driver Release metadata; the GitHub API may be rate-limited."
+
+    if ! jq -e '
+        (.draft // false) == false and
+        (.prerelease // false) == false and
+        (.tag_name | type == "string" and length > 0)
+    ' <<< "$metadata" >/dev/null 2>&1; then
+        die "媒体解码驱动的最新 Release 不是有效的稳定版本。" \
+            "The latest media decode driver Release is not a valid stable release."
+    fi
+    MEDIA_RELEASE_TAG="$(jq -er '.tag_name' <<< "$metadata" 2>/dev/null)" || die \
+        "媒体解码驱动 Release 返回了无效的标签。" \
+        "The media decode driver Release returned an invalid tag."
+    [[ "$MEDIA_RELEASE_TAG" =~ ^[A-Za-z0-9._+~-]+$ && \
+        "$MEDIA_RELEASE_TAG" != "." && "$MEDIA_RELEASE_TAG" != *..* ]] || die \
+        "媒体解码驱动 Release 返回了无效的标签。" \
+        "The media decode driver Release returned an invalid tag."
+
+    driver_json="$(jq -ce --arg name "$MEDIA_DRIVER_NAME" '
+        [.assets[]? | select((.name // "") == $name)]
+        | if length == 1 then .[0] else error("driver asset match is not unique") end
+    ' <<< "$metadata" 2>/dev/null || true)"
+    checksums_json="$(jq -ce --arg name "$MEDIA_CHECKSUMS_NAME" '
+        [.assets[]? | select((.name // "") == $name)]
+        | if length == 1 then .[0] else error("checksum asset match is not unique") end
+    ' <<< "$metadata" 2>/dev/null || true)"
+    [[ -n "$driver_json" && "$driver_json" != "null" ]] || die \
+        "媒体解码驱动 Release 缺少 ${MEDIA_DRIVER_NAME}。" \
+        "The media decode driver Release does not contain ${MEDIA_DRIVER_NAME}."
+    [[ -n "$checksums_json" && "$checksums_json" != "null" ]] || die \
+        "媒体解码驱动 Release 缺少 ${MEDIA_CHECKSUMS_NAME}。" \
+        "The media decode driver Release does not contain ${MEDIA_CHECKSUMS_NAME}."
+
+    MEDIA_DRIVER_DOWNLOAD_URL="$(jq -er '.browser_download_url // empty' \
+        <<< "$driver_json" 2>/dev/null)" || die \
+        "媒体解码驱动 Release 返回了无效的驱动下载地址。" \
+        "The media decode driver Release returned an invalid driver download URL."
+    MEDIA_DRIVER_RELEASE_DIGEST="$(jq -er '.digest // empty' \
+        <<< "$driver_json" 2>/dev/null)" || die \
+        "媒体解码驱动 Release 未提供驱动摘要。" \
+        "The media decode driver Release did not provide a driver digest."
+    MEDIA_DRIVER_RELEASE_SIZE="$(jq -er '.size | select(type == "number" and . > 0 and floor == .)' \
+        <<< "$driver_json" 2>/dev/null)" || die \
+        "媒体解码驱动 Release 返回了无效的驱动大小。" \
+        "The media decode driver Release returned an invalid driver size."
+    MEDIA_CHECKSUMS_DOWNLOAD_URL="$(jq -er '.browser_download_url // empty' \
+        <<< "$checksums_json" 2>/dev/null)" || die \
+        "媒体解码驱动 Release 返回了无效的校验文件下载地址。" \
+        "The media decode driver Release returned an invalid checksum download URL."
+    MEDIA_CHECKSUMS_RELEASE_DIGEST="$(jq -er '.digest // empty' \
+        <<< "$checksums_json" 2>/dev/null)" || die \
+        "媒体解码驱动 Release 未提供校验文件摘要。" \
+        "The media decode driver Release did not provide a checksum-file digest."
+
+    expected_url="${GITHUB_RELEASE_URL}/${MEDIA_DECODE_REPOSITORY}/releases/download/${MEDIA_RELEASE_TAG}/${MEDIA_DRIVER_NAME}"
+    [[ "$MEDIA_DRIVER_DOWNLOAD_URL" == "$expected_url" ]] || die \
+        "媒体解码驱动 Release 返回了无效的驱动下载地址。" \
+        "The media decode driver Release returned an invalid driver download URL."
+    expected_url="${GITHUB_RELEASE_URL}/${MEDIA_DECODE_REPOSITORY}/releases/download/${MEDIA_RELEASE_TAG}/${MEDIA_CHECKSUMS_NAME}"
+    [[ "$MEDIA_CHECKSUMS_DOWNLOAD_URL" == "$expected_url" ]] || die \
+        "媒体解码驱动 Release 返回了无效的校验文件下载地址。" \
+        "The media decode driver Release returned an invalid checksum download URL."
+    release_digest_sha256 "$MEDIA_DRIVER_RELEASE_DIGEST" >/dev/null || die \
+        "媒体解码驱动 Release 返回了无效的驱动 SHA-256 摘要。" \
+        "The media decode driver Release returned an invalid driver SHA-256 digest."
+    release_digest_sha256 "$MEDIA_CHECKSUMS_RELEASE_DIGEST" >/dev/null || die \
+        "媒体解码驱动 Release 返回了无效的校验文件 SHA-256 摘要。" \
+        "The media decode driver Release returned an invalid checksum-file SHA-256 digest."
+    (( MEDIA_DRIVER_RELEASE_SIZE <= MAX_MEDIA_DRIVER_BYTES )) || die \
+        "媒体解码驱动超过允许的大小。" \
+        "The media decode driver exceeds the allowed size."
+
+    log "已选择媒体解码驱动: ${MEDIA_DRIVER_NAME} (${MEDIA_RELEASE_TAG})" \
+        "Selected media decode driver: ${MEDIA_DRIVER_NAME} (${MEDIA_RELEASE_TAG})"
+}
+
+validate_sha256_file() {
+    local file="$1"
+    local expected_checksum="$2"
+    local actual_checksum
+
+    actual_checksum="$(sha256sum "$file" | awk '{print $1}')" || return 1
+    [[ "$actual_checksum" =~ ^[0-9a-f]{64}$ && "$actual_checksum" == "$expected_checksum" ]]
+}
+
+validate_aarch64_shared_object() {
+    local file="$1"
+    local elf_identity elf_type_and_machine
+
+    elf_identity="$(od -An -tx1 -N6 "$file" | tr -d '[:space:]')" || return 1
+    elf_type_and_machine="$(od -An -tx1 -j16 -N4 "$file" | tr -d '[:space:]')" || return 1
+    [[ "$elf_identity" == "7f454c460201" && "$elf_type_and_machine" == "0300b700" ]]
+}
+
+download_media_decode_driver() {
+    local driver_url checksums_url checksums_digest release_driver_digest
+    local manifest_driver_digest driver_size
+
+    MEDIA_DRIVER_FILE="$WORK_DIR/$MEDIA_DRIVER_NAME"
+    MEDIA_CHECKSUMS_FILE="$WORK_DIR/$MEDIA_CHECKSUMS_NAME"
+    driver_url="$(download_url_for_release_asset \
+        "$DOWNLOAD_SOURCE" "$MEDIA_DECODE_REPOSITORY" "$MEDIA_DRIVER_DOWNLOAD_URL")" || die \
+        "无法构造媒体解码驱动的下载地址。" \
+        "Could not build the media decode driver download URL."
+    checksums_url="$(download_url_for_release_asset \
+        "$DOWNLOAD_SOURCE" "$MEDIA_DECODE_REPOSITORY" "$MEDIA_CHECKSUMS_DOWNLOAD_URL")" || die \
+        "无法构造媒体解码驱动校验文件的下载地址。" \
+        "Could not build the media decode driver checksum download URL."
+
+    log "正在从 $(download_source_name "$DOWNLOAD_SOURCE") 下载媒体解码驱动 ${MEDIA_RELEASE_TAG}..." \
+        "Downloading media decode driver ${MEDIA_RELEASE_TAG} from $(download_source_name "$DOWNLOAD_SOURCE")..."
+    download_file "$checksums_url" "$MEDIA_CHECKSUMS_FILE" || die \
+        "媒体解码驱动校验文件下载失败。" \
+        "The media decode driver checksum file download failed."
+    checksums_digest="$(release_digest_sha256 "$MEDIA_CHECKSUMS_RELEASE_DIGEST")" || die \
+        "媒体解码驱动 Release 返回了无效的校验文件 SHA-256 摘要。" \
+        "The media decode driver Release returned an invalid checksum-file SHA-256 digest."
+    validate_sha256_file "$MEDIA_CHECKSUMS_FILE" "$checksums_digest" || die \
+        "下载的 ${MEDIA_CHECKSUMS_NAME} 未通过 Release SHA-256 校验。" \
+        "Downloaded ${MEDIA_CHECKSUMS_NAME} failed Release SHA-256 verification."
+
+    manifest_driver_digest="$(awk -v name="$MEDIA_DRIVER_NAME" '
+        $1 ~ /^[0-9A-Fa-f]{64}$/ && $2 == name { print tolower($1) }
+    ' "$MEDIA_CHECKSUMS_FILE")"
+    [[ "$manifest_driver_digest" =~ ^[0-9a-f]{64}$ ]] || die \
+        "${MEDIA_CHECKSUMS_NAME} 中缺少唯一有效的 ${MEDIA_DRIVER_NAME} 摘要。" \
+        "${MEDIA_CHECKSUMS_NAME} does not contain one valid digest for ${MEDIA_DRIVER_NAME}."
+    [[ "$(awk -v name="$MEDIA_DRIVER_NAME" '$2 == name { count++ } END { print count + 0 }' \
+        "$MEDIA_CHECKSUMS_FILE")" == "1" ]] || die \
+        "${MEDIA_CHECKSUMS_NAME} 中的 ${MEDIA_DRIVER_NAME} 摘要不唯一。" \
+        "${MEDIA_CHECKSUMS_NAME} contains multiple digests for ${MEDIA_DRIVER_NAME}."
+    release_driver_digest="$(release_digest_sha256 "$MEDIA_DRIVER_RELEASE_DIGEST")" || die \
+        "媒体解码驱动 Release 返回了无效的驱动 SHA-256 摘要。" \
+        "The media decode driver Release returned an invalid driver SHA-256 digest."
+    [[ "$manifest_driver_digest" == "$release_driver_digest" ]] || die \
+        "${MEDIA_CHECKSUMS_NAME} 与 Release 中的驱动摘要不一致。" \
+        "The driver digests in ${MEDIA_CHECKSUMS_NAME} and the Release do not match."
+
+    download_file "$driver_url" "$MEDIA_DRIVER_FILE" || die \
+        "媒体解码驱动下载失败。" "The media decode driver download failed."
+    [[ -f "$MEDIA_DRIVER_FILE" ]] || die \
+        "下载的媒体解码驱动不存在。" "The downloaded media decode driver does not exist."
+    driver_size="$(stat -c '%s' "$MEDIA_DRIVER_FILE")" || die \
+        "无法读取媒体解码驱动大小。" "Unable to read the media decode driver size."
+    [[ "$driver_size" =~ ^[0-9]+$ && "$driver_size" -eq "$MEDIA_DRIVER_RELEASE_SIZE" ]] || die \
+        "下载的媒体解码驱动大小与 Release 不一致。" \
+        "The downloaded media decode driver size does not match the Release."
+    validate_sha256_file "$MEDIA_DRIVER_FILE" "$manifest_driver_digest" || die \
+        "下载的 ${MEDIA_DRIVER_NAME} 未通过 SHA-256 校验。" \
+        "Downloaded ${MEDIA_DRIVER_NAME} failed SHA-256 verification."
+    validate_aarch64_shared_object "$MEDIA_DRIVER_FILE" || die \
+        "下载的 ${MEDIA_DRIVER_NAME} 不是 AArch64 ELF 共享对象。" \
+        "Downloaded ${MEDIA_DRIVER_NAME} is not an AArch64 ELF shared object."
 }
 
 validate_archive_size() {
@@ -900,10 +1097,31 @@ install_tar_gz() {
     ldconfig
 }
 
+install_media_decode_driver() {
+    install -d -m 0755 "$MEDIA_DRIVER_INSTALL_DIR" || die \
+        "无法创建媒体解码驱动目录：${MEDIA_DRIVER_INSTALL_DIR}。" \
+        "Unable to create the media decode driver directory: ${MEDIA_DRIVER_INSTALL_DIR}."
+    MEDIA_DRIVER_TEMP_FILE="$(mktemp "${MEDIA_DRIVER_INSTALL_PATH}.tmp.XXXXXXXX")" || die \
+        "无法在目标目录创建媒体解码驱动临时文件。" \
+        "Unable to create a temporary media decode driver in the destination directory."
+    if ! install -m 0644 "$MEDIA_DRIVER_FILE" "$MEDIA_DRIVER_TEMP_FILE"; then
+        rm -f -- "$MEDIA_DRIVER_TEMP_FILE"
+        die "无法写入媒体解码驱动。" "Unable to write the media decode driver."
+    fi
+    if ! mv -f -- "$MEDIA_DRIVER_TEMP_FILE" "$MEDIA_DRIVER_INSTALL_PATH"; then
+        rm -f -- "$MEDIA_DRIVER_TEMP_FILE"
+        die "无法安装媒体解码驱动。" "Unable to install the media decode driver."
+    fi
+    MEDIA_DRIVER_TEMP_FILE=""
+    log "已安装媒体解码驱动: ${MEDIA_DRIVER_INSTALL_PATH} (${MEDIA_RELEASE_TAG})" \
+        "Installed media decode driver: ${MEDIA_DRIVER_INSTALL_PATH} (${MEDIA_RELEASE_TAG})"
+}
+
 install_mesa() {
-    log "正在下载并安装最新版 Mesa 驱动..." \
-        "Downloading and installing the latest Mesa driver..."
+    log "正在下载并安装最新版 Mesa 和媒体解码驱动..." \
+        "Downloading and installing the latest Mesa and media decode drivers..."
     resolve_release_asset
+    resolve_media_decode_release
     select_download_source
     resolve_expected_archive_sha256
     DOWNLOAD_URL="$(download_url_for_source "$DOWNLOAD_SOURCE")" || die \
@@ -925,6 +1143,7 @@ install_mesa() {
             "Downloaded ${ARCHIVE_NAME} failed SHA-256 verification."
     fi
     validate_archive_paths "$ARCHIVE_FILE"
+    download_media_decode_driver
 
     case "$PACKAGE_MANAGER" in
         pacman)
@@ -941,6 +1160,7 @@ install_mesa() {
             ;;
     esac
     configure_package_holds
+    install_media_decode_driver
 }
 
 main() {
@@ -951,8 +1171,8 @@ main() {
     require_root "$@"
     require_commands
     install_mesa
-    log "Mesa 驱动安装完成，相关软件包已锁定。" \
-        "Mesa driver installation completed; related packages are now held."
+    log "Mesa 和媒体解码驱动安装完成，相关软件包已锁定。" \
+        "Mesa and media decode driver installation completed; related packages are now held."
 }
 
 main "$@"

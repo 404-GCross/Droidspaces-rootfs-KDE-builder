@@ -47,7 +47,7 @@ The goal is to reduce the amount of manual setup required to run a desktop Linux
 - Optional Chinese locale with `zh_CN.UTF-8` and `Asia/Shanghai` timezone.
 - Optional Fcitx5 input method. Chinese input addons are installed when Chinese localization is enabled.
 - Snapdragon GPU support using configuration from `mesa-for-android-container`.
-- All seven distributions use `scripts/install-mesa.sh` to install the matching ARM64 Mesa driver and lock related Mesa, KWin, and Xwayland packages against replacement by system upgrades. Source selection, integrity verification, supported systems, and distribution-specific lock mechanisms are documented in the [scripts directory guide](scripts/README_english.md#mesa-installer).
+- All seven distributions use `scripts/install-mesa.sh` to install the matching ARM64 Mesa driver and the latest `droidspaces-media-decode` VA-API driver, then lock related Mesa, KWin, and Xwayland packages against replacement by system upgrades. Source selection, integrity verification, supported systems, and distribution-specific lock mechanisms are documented in the [scripts directory guide](scripts/README_english.md#mesa-installer).
 - Optional Snapdragon 8 Gen 2 Wayland display-corruption fix through a Turnip UBWC environment setting.
 - Container integration improvements for common Android/Droidspaces hardware, network, and group recognition.
 - Optional TMOE integration. Run `tmoe` inside the container to start it.
@@ -417,6 +417,7 @@ KDE packages are published only as GitHub Release assets. When running `build-kd
 
 - [Droidspaces-OSS](https://github.com/ravindu644/Droidspaces-OSS/): the runtime foundation used by this project.
 - [mesa-for-android-container](https://github.com/lfdevs/mesa-for-android-container): Snapdragon GPU driver support.
+- [droidspaces-media-decode](https://github.com/Re-s/droidspaces-media-decode): Android MediaCodec-backed VA-API hardware decoding for containers.
 - [TMOE](https://github.com/2moe/tmoe): convenient management tooling inside the container.
 - [anland](https://github.com/superturtlee/anland): Wayland display backend and patched KDE work.
 - [Droidspaces-USB-Manager](https://github.com/Yizhou147/Droidspaces-USB-Manager): USB storage and ADB device management for Droidspaces.
