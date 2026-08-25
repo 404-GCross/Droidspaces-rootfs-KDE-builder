@@ -279,14 +279,17 @@ RUN if [ "$BUILD_KDE" = "min" ] || [ "$BUILD_KDE" = "conc" ] || [ "$BUILD_KDE" =
         CHROME_PACKAGE="$(find /tmp/chrome-build/google-chrome -maxdepth 1 -type f -name 'google-chrome-*.pkg.tar.*' ! -name '*.sig' -print -quit)" && \
         [ -n "$CHROME_PACKAGE" ] && \
         [ "$(find /tmp/chrome-build/google-chrome -maxdepth 1 -type f -name 'google-chrome-*.pkg.tar.*' ! -name '*.sig' -print | wc -l)" -eq 1 ] && \
-        [ "$(pacman -Qqp "$CHROME_PACKAGE")" = "google-chrome" ] && \
-        LC_ALL=C pacman -Qip "$CHROME_PACKAGE" | grep -Eq '^Architecture[[:space:]]*: aarch64$' && \
-        pacman -U --noconfirm "$CHROME_PACKAGE" && \
+        sed -e '/^[[:space:]]*LocalFileSigLevel[[:space:]]*=/d' \
+            -e '/^\[options\][[:space:]]*$/a LocalFileSigLevel = Optional' \
+            /etc/pacman.conf > /tmp/pacman-chrome.conf && \
+        [ "$(pacman --config /tmp/pacman-chrome.conf -Qqp "$CHROME_PACKAGE")" = "google-chrome" ] && \
+        LC_ALL=C pacman --config /tmp/pacman-chrome.conf -Qip "$CHROME_PACKAGE" | grep -Eq '^Architecture[[:space:]]*: aarch64$' && \
+        pacman --config /tmp/pacman-chrome.conf -U --noconfirm "$CHROME_PACKAGE" && \
         userdel -r chrome-build && \
         if [ -s /tmp/chrome-build-packages ]; then \
             pacman -Rns --noconfirm $(cat /tmp/chrome-build-packages); \
         fi && \
-        rm -f /tmp/chrome-build-packages; \
+        rm -f /tmp/chrome-build-packages /tmp/pacman-chrome.conf; \
     else \
         echo "--> [跳过] 命令行 RootFS 不安装 Google Chrome"; \
     fi
