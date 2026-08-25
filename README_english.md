@@ -48,6 +48,7 @@ The goal is to reduce the amount of manual setup required to run a desktop Linux
 - Optional Fcitx5 input method. Chinese input addons are installed when Chinese localization is enabled.
 - Snapdragon GPU support using configuration from `mesa-for-android-container`.
 - All seven distributions use `scripts/install-mesa.sh` to install the matching ARM64 Mesa driver and the latest `droidspaces-media-decode` VA-API driver, then lock related Mesa, KWin, and Xwayland packages against replacement by system upgrades. Source selection, integrity verification, supported systems, and distribution-specific lock mechanisms are documented in the [scripts directory guide](scripts/README_english.md#mesa-installer).
+- Native ARM64 Google Chrome: every desktop profile replaces Chromium with Chrome Stable. Debian/Ubuntu and Fedora use Google's official repositories; Arch uses the ARM64 AUR packaging recipe.
 - Optional Snapdragon 8 Gen 2 Wayland display-corruption fix through a Turnip UBWC environment setting.
 - Container integration improvements for common Android/Droidspaces hardware, network, and group recognition.
 - Optional TMOE integration. Run `tmoe` inside the container to start it.

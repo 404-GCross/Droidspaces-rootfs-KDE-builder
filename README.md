@@ -48,6 +48,7 @@
 - 输入法：可选安装 Fcitx5；启用中文环境时会额外安装中文输入支持。
 - Snapdragon GPU 支持：集成来自 `mesa-for-android-container` 的高通 GPU 相关配置。
 - 全部七个发行版通过 `scripts/install-mesa.sh` 安装对应的 ARM64 Mesa 驱动及最新版 `droidspaces-media-decode` VA-API 驱动，并锁定相关 Mesa、KWin 和 Xwayland 包，避免系统更新覆盖。镜像源选择、完整性校验、支持系统和各发行版锁定机制见 [scripts 目录说明](scripts/README.md#mesa-安装器)。
+- 原生 ARM64 Google Chrome：全部桌面模式以 Chrome Stable 取代 Chromium；Debian/Ubuntu 和 Fedora 使用 Google 官方软件源，Arch 使用 AUR 的 ARM64 打包配方。
 
 - 骁龙 8 Gen 2 Wayland 花屏修复：可选将 Turnip UBWC 修复开关写入 RootFS 环境变量。
 - 容器增强：补充 Android/Droidspaces 环境下常见的硬件、网络和用户组识别配置。

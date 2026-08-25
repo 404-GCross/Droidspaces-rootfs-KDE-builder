@@ -215,6 +215,18 @@ RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
         echo "--> [跳过] 未开启 Mesa 驱动安装"; \
     fi
 
+# 从 Google 官方 APT 软件源安装原生 ARM64 Chrome，替换 Chromium。
+RUN if [ "$BUILD_KDE" = "min" ] || [ "$BUILD_KDE" = "conc" ] || [ "$BUILD_KDE" = "mobile" ]; then \
+        install -d -m 0755 /etc/apt/keyrings /etc/apt/sources.list.d && \
+        curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && \
+        grep -q 'BEGIN PGP PUBLIC KEY BLOCK' /etc/apt/keyrings/google-chrome.asc && \
+        printf 'deb [arch=arm64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main\n' > /etc/apt/sources.list.d/google-chrome.list && \
+        apt-get update && \
+        apt-get install -y --no-install-recommends google-chrome-stable; \
+    else \
+        echo "--> [跳过] 命令行 RootFS 不安装 Google Chrome"; \
+    fi
+
 # 修复容器内的 DHCP 网络服务配置
 RUN mkdir -p /etc/systemd/network && \
     cat <<'EOF' > /etc/systemd/network/10-eth-dhcp.network

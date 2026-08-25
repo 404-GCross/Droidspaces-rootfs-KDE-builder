@@ -62,7 +62,7 @@ RUN chmod +x /usr/local/sbin/install-anland-kde /usr/local/sbin/install-mesa && 
         dbus-x11 xrandr xset xrdb xhost google-noto-cjk-fonts google-noto-emoji-color-fonts plasma-desktop pipewire pipewire-pulseaudio wireplumber powerdevil kscreen plasma-pa ark kwin upower konsole \
         dolphin kate kinfocenter glx-utils pulseaudio-utils vulkan-tools fedora-logos aha clinfo dmidecode libdisplay-info wayland-utils xorg-x11-server-Xorg \
         kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kscreenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
-        kf6-kimageformats plasma-browser-integration libcanberra-gtk3 gstreamer1-plugins-base gstreamer1-plugins-good sound-theme-freedesktop chromium plasma-milou plasma-workspace plasma-workspace-x11 kwin-x11; \
+        kf6-kimageformats plasma-browser-integration libcanberra-gtk3 gstreamer1-plugins-base gstreamer1-plugins-good sound-theme-freedesktop plasma-milou plasma-workspace plasma-workspace-x11 kwin-x11; \
     fi && \
     # mobile版KDE
     if [ "$BUILD_KDE" = "mobile" ]; then \
@@ -110,17 +110,6 @@ RUN chmod +x /usr/local/sbin/install-anland-kde /usr/local/sbin/install-mesa && 
         ln -sf /usr/local/etc/tmoe-linux/git/debian.sh /usr/local/bin/tmoe && \
         chmod -R 755 /usr/local/etc/tmoe-linux; \
     fi && \
-    for desktop_file in /usr/share/applications/*chromium*.desktop; do \
-        if [ -f "$desktop_file" ]; then \
-            sed -i 's/^Exec=\([^ ]*chromium[^ ]*\)/Exec=\1 --no-sandbox --test-type --password-store=basic/g' "$desktop_file"; \
-        fi; \
-    done && \
-    echo '#!/bin/bash' > /usr/local/bin/chromium-browser && \
-    echo 'exec /usr/bin/chromium-browser --no-sandbox --test-type --password-store=basic "$@"' >> /usr/local/bin/chromium-browser && \
-    chmod +x /usr/local/bin/chromium-browser && \
-    echo '#!/bin/bash' > /usr/local/bin/chromium && \
-    echo 'exec /usr/bin/chromium --no-sandbox --test-type --password-store=basic "$@"' >> /usr/local/bin/chromium && \
-    chmod +x /usr/local/bin/chromium && \
     dnf upgrade -y && \
     dnf clean all && \
     rm -rf /var/cache/dnf
@@ -263,6 +252,25 @@ RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
         /usr/local/sbin/install-mesa --1; \
     else \
         echo "--> [跳过] 未开启 Mesa 驱动安装"; \
+    fi
+
+# 从 Google 官方 RPM 软件源安装原生 ARM64 Chrome，替换 Chromium。
+RUN if [ "$BUILD_KDE" = "min" ] || [ "$BUILD_KDE" = "conc" ] || [ "$BUILD_KDE" = "mobile" ]; then \
+        install -d -m 0755 /etc/pki/rpm-gpg /etc/yum.repos.d && \
+        curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/pki/rpm-gpg/RPM-GPG-KEY-google-chrome && \
+        grep -q 'BEGIN PGP PUBLIC KEY BLOCK' /etc/pki/rpm-gpg/RPM-GPG-KEY-google-chrome && \
+        printf '%s\n' \
+            '[google-chrome]' \
+            'name=Google Chrome' \
+            'baseurl=https://dl.google.com/linux/chrome/rpm/stable/$basearch' \
+            'enabled=1' \
+            'gpgcheck=1' \
+            'repo_gpgcheck=0' \
+            'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-google-chrome' \
+            > /etc/yum.repos.d/google-chrome.repo && \
+        dnf install -y --setopt=install_weak_deps=False google-chrome-stable; \
+    else \
+        echo "--> [跳过] 命令行 RootFS 不安装 Google Chrome"; \
     fi
 
 # 修复容器内的 DHCP 网络服务配置

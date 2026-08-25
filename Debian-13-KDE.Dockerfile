@@ -78,7 +78,7 @@ RUN apt-get update && \
         dbus-x11 x11-xserver-utils fonts-noto-cjk fonts-noto-color-emoji kde-plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin-x11 upower konsole \
         dolphin kate kinfocenter mesa-utils pulseaudio-utils vulkan-tools  desktop-base dbus-user-session aha clinfo dmidecode libdisplay-info-bin wayland-utils xserver-xorg \
         kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kde-config-screenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
-        kimageformat6-plugins webext-plasma-browser-integration libcanberra-pulse gstreamer1.0-plugins-base gstreamer1.0-plugins-good sound-theme-freedesktop chromium chromium-l10n \
+        kimageformat6-plugins webext-plasma-browser-integration libcanberra-pulse gstreamer1.0-plugins-base gstreamer1.0-plugins-good sound-theme-freedesktop \
         systemsettings kde-config-screenlocker kio-extras xdg-user-dirs; \
     fi && \
     # mobile版KDE
@@ -281,6 +281,18 @@ RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
         /usr/local/sbin/install-mesa --1; \
     else \
         echo "--> [跳过] 未开启 Mesa 驱动安装"; \
+    fi
+
+# 从 Google 官方 APT 软件源安装原生 ARM64 Chrome，替换 Chromium。
+RUN if [ "$BUILD_KDE" = "min" ] || [ "$BUILD_KDE" = "conc" ] || [ "$BUILD_KDE" = "mobile" ]; then \
+        install -d -m 0755 /etc/apt/keyrings /etc/apt/sources.list.d && \
+        curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc && \
+        grep -q 'BEGIN PGP PUBLIC KEY BLOCK' /etc/apt/keyrings/google-chrome.asc && \
+        printf 'deb [arch=arm64 signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main\n' > /etc/apt/sources.list.d/google-chrome.list && \
+        apt-get update && \
+        apt-get install -y --no-install-recommends google-chrome-stable; \
+    else \
+        echo "--> [跳过] 命令行 RootFS 不安装 Google Chrome"; \
     fi
 
 # 修复容器内的 DHCP 网络服务配置

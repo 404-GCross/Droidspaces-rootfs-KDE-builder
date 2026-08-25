@@ -58,7 +58,7 @@ RUN chmod +x /usr/local/sbin/install-anland-kde /usr/local/sbin/install-mesa && 
         xorg-xrandr noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
         dolphin kate kinfocenter mesa-utils libpulse vulkan-tools aha clinfo dmidecode wayland-utils xorg-server \
         kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kscreenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
-        kimageformats plasma-browser-integration libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop chromium; \
+        kimageformats plasma-browser-integration libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop; \
     fi && \
     # 移动版 KDE
     if [ "$BUILD_KDE" = "mobile" ]; then \
@@ -71,7 +71,7 @@ RUN chmod +x /usr/local/sbin/install-anland-kde /usr/local/sbin/install-mesa && 
         aha clinfo dmidecode kfind plasma-systemmonitor filelight glmark2 vkmark \
         systemsettings kscreenlocker kio-extras xdg-user-dirs \
         dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers kimageformats \
-        plasma-browser-integration angelfish kclock libcanberra chromium \
+        plasma-browser-integration angelfish kclock libcanberra \
         gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop \
         polkit-kde-agent; \
     fi && \
@@ -252,6 +252,43 @@ RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
         /usr/local/sbin/install-mesa --1; \
     else \
         echo "--> [跳过] 未开启 Mesa 驱动安装"; \
+    fi
+
+# 通过 AUR 安装原生 ARM64 Google Chrome，替换 Chromium。
+RUN if [ "$BUILD_KDE" = "min" ] || [ "$BUILD_KDE" = "conc" ] || [ "$BUILD_KDE" = "mobile" ]; then \
+        : > /tmp/chrome-build-packages && \
+        for package in $(pacman -Sgq base-devel); do \
+            if ! pacman -Qq "$package" >/dev/null 2>&1; then \
+                printf '%s\n' "$package" >> /tmp/chrome-build-packages; \
+            fi; \
+        done && \
+        pacman -S --noconfirm --needed base-devel git && \
+        useradd --system --create-home --home-dir /tmp/chrome-build --shell /bin/bash chrome-build && \
+        runuser -u chrome-build -- git clone --depth=1 https://aur.archlinux.org/google-chrome.git /tmp/chrome-build/google-chrome && \
+        grep -Eq '^[[:space:]]*arch = aarch64$' /tmp/chrome-build/google-chrome/.SRCINFO && \
+        grep -Eq '^[[:space:]]*source_aarch64 = https://dl\.google\.com/linux/chrome/deb/.+_arm64\.deb$' /tmp/chrome-build/google-chrome/.SRCINFO && \
+        grep -Eq '^[[:space:]]*sha512sums_aarch64 = [0-9a-fA-F]{128}$' /tmp/chrome-build/google-chrome/.SRCINFO && \
+        CHROME_DEPENDENCIES="$(sed -n 's/^[[:space:]]*depends = //p' /tmp/chrome-build/google-chrome/.SRCINFO | sed 's/[<>=].*$//' | sort -u)" && \
+        [ -n "$CHROME_DEPENDENCIES" ] && \
+        if printf '%s\n' "$CHROME_DEPENDENCIES" | grep -Eqv '^[A-Za-z0-9@._+][A-Za-z0-9@._+:-]*$'; then \
+            echo "AUR 配方包含无效的 Chrome 依赖" >&2; \
+            exit 1; \
+        fi && \
+        pacman -S --noconfirm --needed --asdeps $CHROME_DEPENDENCIES && \
+        runuser -u chrome-build -- bash -c 'cd "$1" && makepkg --cleanbuild --clean --noconfirm' _ /tmp/chrome-build/google-chrome && \
+        CHROME_PACKAGE="$(find /tmp/chrome-build/google-chrome -maxdepth 1 -type f -name 'google-chrome-*.pkg.tar.*' ! -name '*.sig' -print -quit)" && \
+        [ -n "$CHROME_PACKAGE" ] && \
+        [ "$(find /tmp/chrome-build/google-chrome -maxdepth 1 -type f -name 'google-chrome-*.pkg.tar.*' ! -name '*.sig' -print | wc -l)" -eq 1 ] && \
+        [ "$(pacman -Qqp "$CHROME_PACKAGE")" = "google-chrome" ] && \
+        LC_ALL=C pacman -Qip "$CHROME_PACKAGE" | grep -Eq '^Architecture[[:space:]]*: aarch64$' && \
+        pacman -U --noconfirm "$CHROME_PACKAGE" && \
+        userdel -r chrome-build && \
+        if [ -s /tmp/chrome-build-packages ]; then \
+            pacman -Rns --noconfirm $(cat /tmp/chrome-build-packages); \
+        fi && \
+        rm -f /tmp/chrome-build-packages; \
+    else \
+        echo "--> [跳过] 命令行 RootFS 不安装 Google Chrome"; \
     fi
 
 # 修复容器内的 DHCP 网络服务配置
