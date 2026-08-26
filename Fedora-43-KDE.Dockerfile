@@ -29,13 +29,14 @@ ENV DEBIAN_FRONTEND=noninteractive
 COPY scripts/install-usb-manager.sh /usr/local/sbin/install-droidspaces-usb-manager
 COPY scripts/systemd257.sh /usr/local/sbin/systemd257
 COPY scripts/install-anland-kde.sh /usr/local/sbin/install-anland-kde
+COPY scripts/install-mesa.sh /usr/local/sbin/install-mesa
 
 # 加速下载
 RUN echo "max_parallel_downloads=10" >> /etc/dnf/dnf.conf && \
     echo "fastestmirror=True" >> /etc/dnf/dnf.conf && \
     echo "defaultyes=True" >> /etc/dnf/dnf.conf
 
-RUN chmod +x /usr/local/sbin/install-anland-kde && \
+RUN chmod +x /usr/local/sbin/install-anland-kde /usr/local/sbin/install-mesa && \
     dnf install -y --setopt=install_weak_deps=False \
     # 核心工具组件 
     bash jq dialog coreutils file findutils grep sed gawk curl wget ca-certificates bash-completion systemd-udev dbus-daemon systemd systemd-pam systemd-resolved fastfetch \
@@ -61,7 +62,7 @@ RUN chmod +x /usr/local/sbin/install-anland-kde && \
         dbus-x11 xrandr xset xrdb xhost google-noto-cjk-fonts google-noto-emoji-color-fonts plasma-desktop pipewire pipewire-pulseaudio wireplumber powerdevil kscreen plasma-pa ark kwin upower konsole \
         dolphin kate kinfocenter glx-utils pulseaudio-utils vulkan-tools fedora-logos aha clinfo dmidecode libdisplay-info wayland-utils xorg-x11-server-Xorg \
         kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kscreenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
-        kf6-kimageformats plasma-browser-integration libcanberra-gtk3 gstreamer1-plugins-base gstreamer1-plugins-good sound-theme-freedesktop chromium plasma-milou plasma-workspace plasma-workspace-x11 kwin-x11; \
+        kf6-kimageformats plasma-browser-integration libcanberra-gtk3 gstreamer1-plugins-base gstreamer1-plugins-good sound-theme-freedesktop plasma-milou plasma-workspace plasma-workspace-x11 kwin-x11; \
     fi && \
     # mobile版KDE
     if [ "$BUILD_KDE" = "mobile" ]; then \
@@ -109,17 +110,6 @@ RUN chmod +x /usr/local/sbin/install-anland-kde && \
         ln -sf /usr/local/etc/tmoe-linux/git/debian.sh /usr/local/bin/tmoe && \
         chmod -R 755 /usr/local/etc/tmoe-linux; \
     fi && \
-    for desktop_file in /usr/share/applications/*chromium*.desktop; do \
-        if [ -f "$desktop_file" ]; then \
-            sed -i 's/^Exec=\([^ ]*chromium[^ ]*\)/Exec=\1 --no-sandbox --test-type --password-store=basic/g' "$desktop_file"; \
-        fi; \
-    done && \
-    echo '#!/bin/bash' > /usr/local/bin/chromium-browser && \
-    echo 'exec /usr/bin/chromium-browser --no-sandbox --test-type --password-store=basic "$@"' >> /usr/local/bin/chromium-browser && \
-    chmod +x /usr/local/bin/chromium-browser && \
-    echo '#!/bin/bash' > /usr/local/bin/chromium && \
-    echo 'exec /usr/bin/chromium --no-sandbox --test-type --password-store=basic "$@"' >> /usr/local/bin/chromium && \
-    chmod +x /usr/local/bin/chromium && \
     dnf upgrade -y && \
     dnf clean all && \
     rm -rf /var/cache/dnf
@@ -259,16 +249,28 @@ EOF
 EOF_RUN
 
 RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
-        echo "--> [开启] 正在下载并安装最新版 Mesa 驱动..." && \
-        URL=$(curl -s https://api.github.com/repos/lfdevs/mesa-for-android-container/releases/latest | \
-        jq -r '.assets[] | select(.name | test("mesa-for-android-container_.*_fedora_43_arm64\\.tar\\.gz")) | .browser_download_url' | head -1) && \
-        if [ -z "$URL" ] || [ "$URL" = "null" ]; then echo "获取下载链接失败，可能触发了 GitHub API 限制，或不存在适用于 fedora_43 的包"; exit 1; fi && \
-        wget -q --tries=5 --waitretry=3 -O /tmp/mesa.tar.gz "$URL" && \
-        tar -zxf /tmp/mesa.tar.gz -C / && \
-        rm /tmp/mesa.tar.gz && \
-        ldconfig; \
+        /usr/local/sbin/install-mesa --1; \
     else \
         echo "--> [跳过] 未开启 Mesa 驱动安装"; \
+    fi
+
+# 从 Google 官方 RPM 软件源安装原生 ARM64 Chrome，替换 Chromium。
+RUN if [ "$BUILD_KDE" = "min" ] || [ "$BUILD_KDE" = "conc" ] || [ "$BUILD_KDE" = "mobile" ]; then \
+        install -d -m 0755 /etc/pki/rpm-gpg /etc/yum.repos.d && \
+        curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/pki/rpm-gpg/RPM-GPG-KEY-google-chrome && \
+        grep -q 'BEGIN PGP PUBLIC KEY BLOCK' /etc/pki/rpm-gpg/RPM-GPG-KEY-google-chrome && \
+        printf '%s\n' \
+            '[google-chrome]' \
+            'name=Google Chrome' \
+            'baseurl=https://dl.google.com/linux/chrome/rpm/stable/$basearch' \
+            'enabled=1' \
+            'gpgcheck=1' \
+            'repo_gpgcheck=0' \
+            'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-google-chrome' \
+            > /etc/yum.repos.d/google-chrome.repo && \
+        dnf install -y --setopt=install_weak_deps=False google-chrome-stable; \
+    else \
+        echo "--> [跳过] 命令行 RootFS 不安装 Google Chrome"; \
     fi
 
 # 修复容器内的 DHCP 网络服务配置

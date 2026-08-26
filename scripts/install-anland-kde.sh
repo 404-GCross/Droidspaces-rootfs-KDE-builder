@@ -18,6 +18,9 @@ readonly GHPROXY_NET_RELEASE_URL="https://ghproxy.net/https://github.com"
 readonly APT_HOLD_STATE="/var/lib/anland-kde/apt-holds"
 readonly DNF_MANAGED_BEGIN="# BEGIN anland-kde package holds"
 readonly DNF_MANAGED_END="# END anland-kde package holds"
+readonly MESA_DNF_MANAGED_BEGIN="# BEGIN install-mesa package holds"
+readonly MESA_DNF_MANAGED_END="# END install-mesa package holds"
+readonly SYSTEMD257_STATE="/etc/droidspaces-systemd257"
 
 WORK_DIR=""
 PREPARED_WORK_DIR="${ANLAND_KDE_WORK_DIR:-}"
@@ -772,37 +775,149 @@ rewrite_dnf_config_without_managed_block() {
     ' "$dnf_conf" > "$output_file"
 }
 
+rewrite_dnf_config_without_mesa_block() {
+    local dnf_conf="$1"
+    local output_file="$2"
+
+    awk -v begin="$MESA_DNF_MANAGED_BEGIN" -v end="$MESA_DNF_MANAGED_END" '
+        $0 == begin {
+            if (inside) {
+                invalid = 1
+            }
+            begins++
+            inside = 1
+            next
+        }
+        $0 == end {
+            if (!inside) {
+                invalid = 1
+            }
+            ends++
+            inside = 0
+            next
+        }
+        !inside { print }
+        END {
+            if (invalid || inside || begins != ends || begins > 1) {
+                exit 1
+            }
+        }
+    ' "$dnf_conf" > "$output_file"
+}
+
+rewrite_dnf_config_for_package_install() {
+    local dnf_conf="$1"
+    local output_file="$2"
+
+    awk '
+        function sanitize(line, equals, value, count, tokens, result, separator, i) {
+            equals = index(line, "=")
+            value = substr(line, equals + 1)
+            gsub(/,/, " ", value)
+            count = split(value, tokens, /[[:space:]]+/)
+            result = ""
+            separator = ""
+            for (i = 1; i <= count; i++) {
+                if (tokens[i] == "" || tokens[i] == "kwin*" || \
+                    tokens[i] == "xorg-x11-server-Xwayland*") {
+                    continue
+                }
+                result = result separator tokens[i]
+                separator = ","
+            }
+            return result == "" ? "" : substr(line, 1, equals) result
+        }
+        /^\[main\][[:space:]]*$/ {
+            in_main = 1
+            print
+            next
+        }
+        /^\[[^]]+\][[:space:]]*$/ {
+            in_main = 0
+            print
+            next
+        }
+        {
+            if (in_main && $0 ~ /^[[:space:]]*(exclude|excludepkgs)[[:space:]]*=/) {
+                sanitized = sanitize($0)
+                if (sanitized != "") {
+                    print sanitized
+                }
+                next
+            }
+            print
+        }
+    ' "$dnf_conf" > "$output_file"
+}
+
 remove_managed_dnf_excludes() {
     local dnf_conf="$1"
-    local temporary_conf
+    local temporary_conf mesa_stripped_conf transaction_conf
 
+    # Local patched RPMs must bypass both hold blocks. The caller restores
+    # the original configuration immediately after the DNF transaction.
     temporary_conf="$(mktemp -t anland-kde-dnf.XXXXXXXX)"
-    if ! rewrite_dnf_config_without_managed_block "$dnf_conf" "$temporary_conf"; then
-        rm -f -- "$temporary_conf"
+    mesa_stripped_conf="$(mktemp -t anland-kde-dnf.XXXXXXXX)"
+    transaction_conf="$(mktemp -t anland-kde-dnf.XXXXXXXX)"
+    if ! rewrite_dnf_config_without_managed_block "$dnf_conf" "$temporary_conf" || \
+        ! rewrite_dnf_config_without_mesa_block "$temporary_conf" "$mesa_stripped_conf" || \
+        ! rewrite_dnf_config_for_package_install "$mesa_stripped_conf" "$transaction_conf"; then
+        rm -f -- "$temporary_conf" "$mesa_stripped_conf" "$transaction_conf"
         return 1
     fi
-    if ! install -m 0644 "$temporary_conf" "$dnf_conf"; then
-        rm -f -- "$temporary_conf"
+    if ! install -m 0644 "$transaction_conf" "$dnf_conf"; then
+        rm -f -- "$temporary_conf" "$mesa_stripped_conf" "$transaction_conf"
         return 1
     fi
-    rm -f -- "$temporary_conf"
+    rm -f -- "$temporary_conf" "$mesa_stripped_conf" "$transaction_conf"
 }
 
 write_dnf_config_with_managed_block() {
     local dnf_conf="$1"
     local output_file="$2"
     local stripped_conf
+    local excluded_packages="kwin*,xorg-x11-server-Xwayland*"
+
+    if [[ -e "$SYSTEMD257_STATE" ]]; then
+        excluded_packages+=",systemd*"
+    fi
 
     stripped_conf="$(mktemp -t anland-kde-dnf.XXXXXXXX)"
     if ! rewrite_dnf_config_without_managed_block "$dnf_conf" "$stripped_conf"; then
         rm -f -- "$stripped_conf"
         return 1
     fi
-    if ! awk -v begin="$DNF_MANAGED_BEGIN" -v end="$DNF_MANAGED_END" '
+    if ! awk -v begin="$DNF_MANAGED_BEGIN" -v end="$DNF_MANAGED_END" \
+        -v excludes="$excluded_packages" '
+        function contains(value, wanted, normalized, count, tokens, i) {
+            normalized = value
+            gsub(/,/, " ", normalized)
+            count = split(normalized, tokens, /[[:space:]]+/)
+            for (i = 1; i <= count; i++) {
+                if (tokens[i] == wanted) {
+                    return 1
+                }
+            }
+            return 0
+        }
+        function merge_excludes(line, equals, value, trimmed, separator, count, wanted, i) {
+            equals = index(line, "=")
+            value = substr(line, equals + 1)
+            trimmed = value
+            sub(/[[:space:]]+$/, "", trimmed)
+            separator = (trimmed == "" || trimmed ~ /,$/) ? "" : ","
+            count = split(excludes, wanted, ",")
+            for (i = 1; i <= count; i++) {
+                if (!contains(value, wanted[i])) {
+                    value = value separator wanted[i]
+                    separator = ","
+                }
+            }
+            return substr(line, 1, equals) value
+        }
         function write_block() {
-            print ""
             print begin
-            print "excludepkgs=kwin*,xorg-x11-server-Xwayland*"
+            print "excludepkgs=" excludes
             print end
         }
         /^\[main\][[:space:]]*$/ {
@@ -812,19 +927,24 @@ write_dnf_config_with_managed_block() {
             next
         }
         /^\[[^]]+\][[:space:]]*$/ {
-            if (in_main && !wrote_block) {
+            if (in_main && !saw_exclude) {
                 write_block()
-                wrote_block = 1
             }
             in_main = 0
             print
             next
         }
-        { print }
+        {
+            if (in_main && $0 ~ /^[[:space:]]*excludepkgs[[:space:]]*=/) {
+                print merge_excludes($0)
+                saw_exclude = 1
+                next
+            }
+            print
+        }
         END {
-            if (in_main && !wrote_block) {
+            if (in_main && !saw_exclude) {
                 write_block()
-                wrote_block = 1
             }
             if (!saw_main) {
                 print "[main]"
@@ -856,7 +976,7 @@ configure_dnf_excludes() {
 }
 
 install_rpm_packages() {
-    local -a files packages
+    local -a files packages dnf_install_options=()
     local dnf_conf="/etc/dnf/dnf.conf"
     local dnf_backup
 
@@ -870,10 +990,21 @@ install_rpm_packages() {
     touch "$dnf_conf"
     dnf_backup="$(mktemp -t anland-kde-dnf-backup.XXXXXXXX)"
     cp -p "$dnf_conf" "$dnf_backup"
-    if ! remove_managed_dnf_excludes "$dnf_conf" || ! dnf install -y "${files[@]}"; then
+    if grep -Fqx "$MESA_DNF_MANAGED_BEGIN" "$dnf_conf"; then
+        dnf_install_options+=('--exclude=mesa*')
+    fi
+    if [[ -e "$SYSTEMD257_STATE" ]]; then
+        dnf_install_options+=('--exclude=systemd*')
+    fi
+    if ! remove_managed_dnf_excludes "$dnf_conf" || \
+        ! dnf install -y "${dnf_install_options[@]}" "${files[@]}"; then
         install -m 0644 "$dnf_backup" "$dnf_conf" || true
         rm -f -- "$dnf_backup"
         die "rpm 软件包安装失败。" "RPM package installation failed."
+    fi
+    if ! install -m 0644 "$dnf_backup" "$dnf_conf"; then
+        rm -f -- "$dnf_backup"
+        die "无法恢复 DNF 锁定配置。" "Unable to restore the DNF hold configuration."
     fi
 
     mapfile -t packages < <(rpm -qp --queryformat '%{NAME}\n' "${files[@]}" | sort -u)

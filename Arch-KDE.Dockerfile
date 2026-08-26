@@ -26,8 +26,9 @@ ARG ANLAND_KDE_PACKAGE_REVISION=unknown
 COPY scripts/install-usb-manager.sh /usr/local/sbin/install-droidspaces-usb-manager
 COPY scripts/systemd257.sh /usr/local/sbin/systemd257
 COPY scripts/install-anland-kde.sh /usr/local/sbin/install-anland-kde
+COPY scripts/install-mesa.sh /usr/local/sbin/install-mesa
 
-RUN chmod +x /usr/local/sbin/install-anland-kde && \
+RUN chmod +x /usr/local/sbin/install-anland-kde /usr/local/sbin/install-mesa && \
     sed -i '/^#ParallelDownloads/s/^#//' /etc/pacman.conf && \
     sed -i '/NoExtract.*locale/d' /etc/pacman.conf && \
     sed -i '/NoExtract.*i18n/d' /etc/pacman.conf && \
@@ -57,7 +58,7 @@ RUN chmod +x /usr/local/sbin/install-anland-kde && \
         xorg-xrandr noto-fonts-cjk noto-fonts-emoji plasma-desktop pipewire pipewire-pulse wireplumber powerdevil kscreen plasma-pa ark kwin kwin-x11 upower konsole \
         dolphin kate kinfocenter mesa-utils libpulse vulkan-tools aha clinfo dmidecode wayland-utils xorg-server \
         kfind plasma-systemmonitor filelight glmark2 vkmark systemsettings kscreenlocker kio-extras xdg-user-dirs dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers \
-        kimageformats plasma-browser-integration libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop chromium; \
+        kimageformats plasma-browser-integration libcanberra gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop; \
     fi && \
     # 移动版 KDE
     if [ "$BUILD_KDE" = "mobile" ]; then \
@@ -70,7 +71,7 @@ RUN chmod +x /usr/local/sbin/install-anland-kde && \
         aha clinfo dmidecode kfind plasma-systemmonitor filelight glmark2 vkmark \
         systemsettings kscreenlocker kio-extras xdg-user-dirs \
         dolphin-plugins ffmpegthumbs kdegraphics-thumbnailers kimageformats \
-        plasma-browser-integration angelfish kclock libcanberra chromium \
+        plasma-browser-integration angelfish kclock libcanberra \
         gstreamer gst-plugins-base gst-plugins-good sound-theme-freedesktop \
         polkit-kde-agent; \
     fi && \
@@ -248,18 +249,49 @@ EOF_RUN
 
 # 下载并安装 Mesa
 RUN if [ "$ENABLE_mesa_ARG" = "true" ]; then \
-        echo "--> [开启] 正在下载并安装最新版 Mesa 驱动..." && \
-        URL=$(curl -s https://api.github.com/repos/lfdevs/mesa-for-android-container/releases/latest | \
-        jq -r '.assets[] | select(.name | test("mesa-for-android-container_.*_archlinux_arm64\\.tar")) | .browser_download_url' | head -1) && \
-        if [ -z "$URL" ] || [ "$URL" = "null" ]; then echo "获取下载链接失败，可能是触发了 GitHub API 速率限制"; exit 1; fi && \
-        wget -q --tries=5 --waitretry=3 -O /tmp/mesa.tar "$URL" && \
-        tar -xf /tmp/mesa.tar -C /tmp && \
-        cp /etc/pacman.conf /tmp/pacman-nosig.conf && \
-        sed -i 's/.*SigLevel.*/SigLevel = Never/g' /tmp/pacman-nosig.conf && \
-        pacman --config /tmp/pacman-nosig.conf -U --noconfirm /tmp/*.pkg.tar.* && \
-        rm -f /tmp/mesa.tar /tmp/*.pkg.tar.* /tmp/pacman-nosig.conf /tmp/*.sig ; \
+        /usr/local/sbin/install-mesa --1; \
     else \
         echo "--> [跳过] 未开启 Mesa 驱动安装"; \
+    fi
+
+# 通过 AUR 安装原生 ARM64 Google Chrome，替换 Chromium。
+RUN if [ "$BUILD_KDE" = "min" ] || [ "$BUILD_KDE" = "conc" ] || [ "$BUILD_KDE" = "mobile" ]; then \
+        : > /tmp/chrome-build-packages && \
+        for package in $(pacman -Sgq base-devel); do \
+            if ! pacman -Qq "$package" >/dev/null 2>&1; then \
+                printf '%s\n' "$package" >> /tmp/chrome-build-packages; \
+            fi; \
+        done && \
+        pacman -S --noconfirm --needed base-devel git && \
+        useradd --system --create-home --home-dir /tmp/chrome-build --shell /bin/bash chrome-build && \
+        runuser -u chrome-build -- git clone --depth=1 https://aur.archlinux.org/google-chrome.git /tmp/chrome-build/google-chrome && \
+        grep -Eq '^[[:space:]]*arch = aarch64$' /tmp/chrome-build/google-chrome/.SRCINFO && \
+        grep -Eq '^[[:space:]]*source_aarch64 = https://dl\.google\.com/linux/chrome/deb/.+_arm64\.deb$' /tmp/chrome-build/google-chrome/.SRCINFO && \
+        grep -Eq '^[[:space:]]*sha512sums_aarch64 = [0-9a-fA-F]{128}$' /tmp/chrome-build/google-chrome/.SRCINFO && \
+        CHROME_DEPENDENCIES="$(sed -n 's/^[[:space:]]*depends = //p' /tmp/chrome-build/google-chrome/.SRCINFO | sed 's/[<>=].*$//' | sort -u)" && \
+        [ -n "$CHROME_DEPENDENCIES" ] && \
+        if printf '%s\n' "$CHROME_DEPENDENCIES" | grep -Eqv '^[A-Za-z0-9@._+][A-Za-z0-9@._+:-]*$'; then \
+            echo "AUR 配方包含无效的 Chrome 依赖" >&2; \
+            exit 1; \
+        fi && \
+        pacman -S --noconfirm --needed --asdeps $CHROME_DEPENDENCIES && \
+        runuser -u chrome-build -- bash -c 'cd "$1" && makepkg --cleanbuild --clean --noconfirm' _ /tmp/chrome-build/google-chrome && \
+        CHROME_PACKAGE="$(find /tmp/chrome-build/google-chrome -maxdepth 1 -type f -name 'google-chrome-*.pkg.tar.*' ! -name '*.sig' -print -quit)" && \
+        [ -n "$CHROME_PACKAGE" ] && \
+        [ "$(find /tmp/chrome-build/google-chrome -maxdepth 1 -type f -name 'google-chrome-*.pkg.tar.*' ! -name '*.sig' -print | wc -l)" -eq 1 ] && \
+        sed -e '/^[[:space:]]*LocalFileSigLevel[[:space:]]*=/d' \
+            -e '/^\[options\][[:space:]]*$/a LocalFileSigLevel = Optional' \
+            /etc/pacman.conf > /tmp/pacman-chrome.conf && \
+        [ "$(pacman --config /tmp/pacman-chrome.conf -Qqp "$CHROME_PACKAGE")" = "google-chrome" ] && \
+        LC_ALL=C pacman --config /tmp/pacman-chrome.conf -Qip "$CHROME_PACKAGE" | grep -Eq '^Architecture[[:space:]]*: aarch64$' && \
+        pacman --config /tmp/pacman-chrome.conf -U --noconfirm "$CHROME_PACKAGE" && \
+        userdel -r chrome-build && \
+        if [ -s /tmp/chrome-build-packages ]; then \
+            pacman -Rns --noconfirm $(cat /tmp/chrome-build-packages); \
+        fi && \
+        rm -f /tmp/chrome-build-packages /tmp/pacman-chrome.conf; \
+    else \
+        echo "--> [跳过] 命令行 RootFS 不安装 Google Chrome"; \
     fi
 
 # 修复容器内的 DHCP 网络服务配置
