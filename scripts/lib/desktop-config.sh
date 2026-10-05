@@ -8,6 +8,7 @@ desktop_normalize() {
         GNOME|gnome) printf '%s\n' gnome ;;
         'Anland Next'|anland-next) printf '%s\n' anland-next ;;
         Niri|niri) printf '%s\n' niri ;;
+        'DroidDeck Steam'|steam) printf '%s\n' steam ;;
         *) return 1 ;;
     esac
 }
@@ -20,6 +21,7 @@ desktop_label() {
         gnome) printf '%s\n' GNOME ;;
         anland-next) printf '%s\n' 'Anland Next' ;;
         niri) printf '%s\n' Niri ;;
+        steam) printf '%s\n' 'DroidDeck Steam' ;;
         *) return 1 ;;
     esac
 }
@@ -73,6 +75,7 @@ desktop_target_supported() {
             esac
             ;;
         niri) [[ "$target" == Arch ]] ;;
+        steam) [[ "$target" == Arch ]] ;;
         *) return 1 ;;
     esac
 }
@@ -104,6 +107,7 @@ desktop_backend_supported() {
             esac
             ;;
         niri:anland-wayland) [[ "$target" == Arch ]] ;;
+        steam:anland-wayland) [[ "$target" == Arch ]] ;;
         *) return 1 ;;
     esac
 }
@@ -117,6 +121,9 @@ desktop_wayland_targets_json() {
             printf '%s\n' '["Debian-13","Ubuntu-26","Arch"]'
             ;;
         niri)
+            printf '%s\n' '["Arch"]'
+            ;;
+        steam)
             printf '%s\n' '["Arch"]'
             ;;
         *) return 1 ;;
