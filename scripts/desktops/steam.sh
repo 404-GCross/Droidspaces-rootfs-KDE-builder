@@ -88,7 +88,7 @@ install_arch() {
 
     pacman -S --noconfirm --needed \
         gamescope binutils zstd \
-        vulkan-tools mesa-utils glx-utils \
+        vulkan-tools mesa-utils mesa-demos \
         dbus libpulse \
         python curl unzip ca-certificates \
         fontconfig freetype2 ttf-dejavu xdg-user-dirs \
