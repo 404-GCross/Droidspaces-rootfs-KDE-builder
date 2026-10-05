@@ -1,0 +1,88 @@
+#!/bin/bash
+# DroidDeck 会话（容器版）：在 Anland Wayland 上以 Steam Deck 模式运行 Valve 原生 arm64
+# Steam 客户端，gamescope 提供合成与 Xwayland。
+#
+# 由 DroidDeck 的 bannerlator-session（GPL-3.0）派生并精简：
+#   - 会话宿主改为 Anland 的 anland-session（wayland socket + rootless Xwayland + mini-wm）
+#   - 去掉 proot/应用注入（BL_*）与 fake-evdev 输入层：容器里有真 /dev/input 与 /dev/uinput
+#   - 客户端与 Proton 仍由 Valve CDN / Steam 自身分发
+#
+# 由 Droidspaces 的 desktop-session.service 以普通用户身份运行（/etc/droidspaces-desktop.conf
+# 选择 steam/anland-wayland 时）。可用环境变量：
+#   DROIDDECK_WIDTH / DROIDDECK_HEIGHT  内部分辨率（默认 1920x1200）
+#   DROIDDECK_REFRESH                   刷新率，0 = 交给 gamescope（默认 0）
+#   DROIDDECK_STEAM_CHANNEL             客户端分支（默认 steamdeck_publicbeta）
+set -u
+
+export PATH="/usr/local/bin:${PATH}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export XDG_SESSION_TYPE=wayland
+
+steam_channel="${DROIDDECK_STEAM_CHANNEL:-steamdeck_publicbeta}"
+steam_root="${XDG_DATA_HOME:-$HOME/.local/share}/Steam"
+client="$steam_root/steamrtarm64/steam"
+# Value Valve's arm64 client ships as a compatibility tool of ours.
+proton_depot_appid=4427310
+
+log() { echo "== droiddeck-session: $*"; }
+
+# 1) Anland 会话本体：wayland socket 链接、rootless Xwayland、mini-wm 与会话 D-Bus。
+#    由它发布 ~/.anlandx-env 与 $XDG_RUNTIME_DIR/wayland-anland。
+/usr/bin/anland-session &
+anland_pid=$!
+trap 'kill "$anland_pid" 2>/dev/null' EXIT
+
+log "waiting for the Anland session (wayland socket)"
+ready=
+for _ in $(seq 1 150); do
+    if [ -S "$XDG_RUNTIME_DIR/wayland-anland" ] && [ -s "$HOME/.anlandx-env" ]; then
+        ready=1
+        break
+    fi
+    if ! kill -0 "$anland_pid" 2>/dev/null; then
+        log "anland-session exited while starting (is the Anland host daemon running?)"
+        exit 1
+    fi
+    sleep 0.2
+done
+if [ -z "$ready" ]; then
+    log "no wayland socket after 30s; check the Anland host module and the /run/anland bind mount"
+    exit 1
+fi
+
+# shellcheck disable=SC1091
+[ -r "$HOME/.anlandx-env" ] && . "$HOME/.anlandx-env"
+export WAYLAND_DISPLAY=wayland-anland
+log "Anland session ready (DISPLAY=${DISPLAY:-unset}, WAYLAND_DISPLAY=$WAYLAND_DISPLAY, PULSE_SERVER=${PULSE_SERVER:-unset})"
+
+# 2) 客户端与 ARM64 Proton：首启从 Valve 拉取客户端；把客户端自带的 ARM64 Proton
+#    注册成可运行的兼容工具（Valve 原版会套 pressure-vessel，Android 内核给不了）。
+if [ ! -x "$client" ]; then
+    log "fetching the native arm64 Steam client from Valve (first run)"
+    BL_STEAM_CHANNEL="$steam_channel" bannerlator-steam-install || exit $?
+fi
+bannerlator-steam-compat "$steam_root" || true
+
+# 首次请求客户端安装 ARM64 Proton depot；已登录的话客户端随后会处理。
+if [ ! -f "$steam_root/steamapps/appmanifest_${proton_depot_appid}.acf" ]; then
+    set -- "$@" "steam://install/${proton_depot_appid}"
+fi
+
+# 3) gamescope 上的 Deck 会话。Xwayland 由 gamescope 提供，CEF 明确走 x11。
+width="${DROIDDECK_WIDTH:-1920}"
+height="${DROIDDECK_HEIGHT:-1200}"
+refresh="${DROIDDECK_REFRESH:-0}"
+
+gamescope_args=(--backend wayland --expose-wayland -f -W "$width" -H "$height")
+case "$refresh" in
+    ''|*[!0-9]*) ;;
+    0) ;;
+    *) gamescope_args+=(-r "$refresh") ;;
+esac
+gamescope_args+=(-e --)
+
+log "starting gamescope ${width}x${height}${refresh:+ @${refresh}Hz} with the Steam client"
+exec gamescope "${gamescope_args[@]}" \
+    "$client" -gamepadui -steamdeck -steamos3 -clientbeta "$steam_channel" \
+    -no-cef-sandbox -cef-force-gpu -cef-ozone-platform=x11 \
+    -cef-use-gl=angle -cef-use-angle=vulkan "$@"

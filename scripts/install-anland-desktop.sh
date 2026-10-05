@@ -10,6 +10,7 @@ case "$desktop" in
     gnome) installer="/usr/local/sbin/install-anland-gnome" ;;
     anland-next) installer="/usr/local/sbin/install-anland-next" ;;
     niri) installer="/usr/local/sbin/install-anland-niri" ;;
+    steam) installer="/usr/local/sbin/install-anland-next" ;;
     *)
         echo "桌面 $desktop 没有 Anland 软件包安装器。" >&2
         exit 1

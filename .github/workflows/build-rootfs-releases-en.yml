@@ -35,6 +35,7 @@ on:
           - GNOME
           - Anland Next
           - Niri
+          - DroidDeck Steam
       desktop_autostart:
         description: Start desktop on boot
         required: true

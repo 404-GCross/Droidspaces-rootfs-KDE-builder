@@ -17,6 +17,9 @@ case "${DESKTOP:-}:${DISPLAY_BACKEND:-}" in
     # systemd 用户管理器不可用时它只告警继续，所以不需要用户级单元先起来。
     anland-next:anland-wayland) command_line='exec /usr/bin/anland-session' ;;
     niri:anland-wayland) command_line='exec /usr/local/bin/start-anland-niri' ;;
+    # DroidDeck Steam：不含完整桌面。会话脚本先拉起 anland-session（Wayland socket +
+    # rootless Xwayland + mini-wm），再在其上以 Deck 模式运行 gamescope 与 Steam 客户端。
+    steam:anland-wayland) command_line='exec /usr/local/bin/droiddeck-session' ;;
     *)
         echo "不支持的桌面会话：${DESKTOP:-未设置}/${DISPLAY_BACKEND:-未设置}" >&2
         exit 1

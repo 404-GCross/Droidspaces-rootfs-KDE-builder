@@ -21,7 +21,7 @@ case "$display_backend" in
         ;;
 esac
 
-[[ "$desktop" == none ]] && exit 0
+[[ "$desktop" == none || "$desktop" == steam ]] && exit 0
 
 install_debian_chrome() {
     install -d -m 0755 /etc/apt/keyrings /etc/apt/sources.list.d

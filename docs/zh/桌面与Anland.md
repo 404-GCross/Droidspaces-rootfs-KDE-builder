@@ -14,6 +14,7 @@
 | GNOME + Anland Wayland | `gnome-session --session=gnome` |
 | Anland Next | `/usr/bin/anland-session` |
 | Niri | `/usr/bin/niri-anland` |
+| DroidDeck Steam | `/usr/local/bin/droiddeck-session` |
 
 服务在桌面异常退出后等待 2 秒重启；60 秒内连续失败超过 5 次会暂停重试。正常退出不会触发重启。
 
@@ -45,6 +46,23 @@ Niri 启动时检查 `/run/display.sock` 与 `xwayland-satellite`，并设置 An
    ```
 
 启动容器并以普通用户登录。KDE 可手动运行 `startplasma-wayland`；KDE Mobile 使用 `startplasmamobile`；GNOME 使用 `gnome-session --session=gnome`。
+
+### DroidDeck Steam 宿主端配置（Anland 6.x）
+
+DroidDeck Steam 会话走 Anland 6.x 的 `anland-awl`（Wayland host），与上面 KDE/GNOME/Niri 使用的
+legacy `virtual-drm-daemon` 不是同一套，宿主端按下面准备：
+
+1. 从 [Anland Releases](https://github.com/SuperTurtleDev/anland/releases) 下载 6.x 构建包，
+   刷入 `module/anland-awl.zip`（KernelSU/SukiSU 模块），安装 `anland-wayland.apk`，重启设备。
+2. 容器设置：开启硬件访问；按设备情况启用特权模式与 `nocaps`、`noseccomp`。
+3. 添加绑定挂载（注意与 legacy 的 `/run/display.sock` 不同）：
+
+   ```text
+   /data/local/tmp/awl -> /run/anland
+   ```
+
+启动容器后由 `desktop-session.service` 自动运行 `/usr/local/bin/droiddeck-session`；手动启动
+同样使用该命令。首次启动会从 Valve 拉取原生 arm64 Steam 客户端，并注册 ARM64 Proton 兼容工具。
 
 ### 安装或更新 Anland 桌面组件
 
